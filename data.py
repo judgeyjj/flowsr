@@ -168,6 +168,28 @@ def curtail_to_shortest_collate(data):
 def pad_to_longest_fn(data):
     return pad_sequence(data, batch_first = True)
 
-def get_dataloader(ds, pad_to_longest = True, **kwargs):
+def get_dataloader(
+    ds,
+    pad_to_longest: bool = True,
+    *,
+    num_workers: int = 0,
+    persistent_workers: bool = False,
+    pin_memory: bool = True,
+    **kwargs
+):
+    """
+    Create dataloader with configurable worker settings.
+    NOTE: In DDP/multi-process, large num_workers * world_size can easily stall at the first batch,
+    especially with heavy CPU ops (librosa/scipy). Prefer smaller num_workers and disable persistent_workers.
+    """
     collate_fn = pad_to_longest_fn if pad_to_longest else curtail_to_shortest_collate
-    return DataLoader(ds, collate_fn = collate_fn, num_workers = 8, persistent_workers=True, **kwargs)
+    num_workers = int(num_workers or 0)
+    persistent_workers = bool(persistent_workers) and num_workers > 0
+    return DataLoader(
+        ds,
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        persistent_workers=persistent_workers,
+        pin_memory=bool(pin_memory),
+        **kwargs
+    )

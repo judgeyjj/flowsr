@@ -250,6 +250,8 @@ if __name__ == "__main__":
                               swanlab_project=getattr(hparams.train, 'swanlab_project', 'flowsr'),
                               swanlab_log_interval_steps=getattr(hparams.train, 'swanlab_log_interval_steps', 0),
                               ddp_find_unused_parameters=getattr(hparams.train, 'ddp_find_unused_parameters', False),
+                              dataloader_num_workers=getattr(hparams.data, 'num_workers', 0),
+                              dataloader_persistent_workers=False,
                               )
     
     r0_print('Start training...')

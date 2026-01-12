@@ -116,6 +116,9 @@ class FLowHighTrainer(nn.Module):
         swanlab_log_interval_steps: int = 0,
         # ddp
         ddp_find_unused_parameters: bool = False,
+        # dataloader
+        dataloader_num_workers: int = 0,
+        dataloader_persistent_workers: bool = False,
     ):
         super().__init__()
 
@@ -167,9 +170,27 @@ class FLowHighTrainer(nn.Module):
         self.scheduler = CosineAnnealingLR(self.optim, T_max=self.num_train_steps)
         self.num_warmup_steps = num_warmup_steps if exists(num_warmup_steps) else 0
         
-        # dataloader
-        self.dataloader = get_dataloader(self.train_ds, batch_size = batch_size, shuffle = True, drop_last = drop_last)
-        self.valid_dataloader = get_dataloader(self.valid_ds, batch_size = 1, shuffle = True, drop_last = drop_last)
+        # dataloader (make worker settings configurable; DDP recommends smaller num_workers & no persistent_workers)
+        self.dataloader_num_workers = int(dataloader_num_workers or 0)
+        self.dataloader_persistent_workers = bool(dataloader_persistent_workers)
+        persistent_ok = self.dataloader_persistent_workers and (not self.is_distributed)
+
+        self.dataloader = get_dataloader(
+            self.train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=drop_last,
+            num_workers=self.dataloader_num_workers,
+            persistent_workers=persistent_ok,
+        )
+        self.valid_dataloader = get_dataloader(
+            self.valid_ds,
+            batch_size=1,
+            shuffle=True,
+            drop_last=drop_last,
+            num_workers=max(0, min(2, self.dataloader_num_workers)),
+            persistent_workers=False,
+        )
         # fixed_valid_indices = [0, 11, 17, 31, 59, 61, 79, 83, 107, 119, 131, 151]  
         # fixed_valid_subset = Subset(self.valid_ds, fixed_valid_indices)
         # self.valid_dataloader = get_dataloader(fixed_valid_subset, batch_size = 1, shuffle = False, drop_last = drop_last)
@@ -198,8 +219,8 @@ class FLowHighTrainer(nn.Module):
         self.results_folder = Path(results_folder)
         print("results_folder",self.results_folder)
 
-        # Ask if the existing checkpoint should be deleted
-        if self.is_main and force_clear_prev_results is True or (not exists(force_clear_prev_results) and len([*self.results_folder.glob('**/*')]) > 0 and yes_or_no('do you want to clear previous experiment checkpoints and results?')):
+        # Non-interactive default: never prompt. Only clear when explicitly requested.
+        if self.is_main and force_clear_prev_results is True:
             rmtree(str(self.results_folder))
 
         # Create a directory for saving results
