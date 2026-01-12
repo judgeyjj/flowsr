@@ -165,7 +165,8 @@ class FLowHighTrainer(nn.Module):
             self.num_train_steps = len(dataset) // batch_size * num_epochs
         else:
             self.num_train_steps = num_train_steps
-        print('num_train_stpes: ',num_train_steps)
+        if self.is_main:
+            self.print(f'num_train_steps: {self.num_train_steps} (raw num_train_steps arg: {num_train_steps})')
         
         self.scheduler = CosineAnnealingLR(self.optim, T_max=self.num_train_steps)
         self.num_warmup_steps = num_warmup_steps if exists(num_warmup_steps) else 0
@@ -217,7 +218,8 @@ class FLowHighTrainer(nn.Module):
         self.save_results_every = save_results_every
 
         self.results_folder = Path(results_folder)
-        print("results_folder",self.results_folder)
+        if self.is_main:
+            self.print(f"results_folder {self.results_folder}")
 
         # Non-interactive default: never prompt. Only clear when explicitly requested.
         if self.is_main and force_clear_prev_results is True:
@@ -241,9 +243,12 @@ class FLowHighTrainer(nn.Module):
         self.swanlab_log_interval_steps = int(swanlab_log_interval_steps or 0)
         self.downsampling = downsampling
         self.sampling_rates = sampling_rates
-        self.eval_stft = STFTMag(nfft=cfm_wrapper.flowhigh.audio_enc_dec.n_fft,
-                                 hop=cfm_wrapper.flowhigh.audio_enc_dec.hop_length,
-                                 window_len=cfm_wrapper.flowhigh.audio_enc_dec.win_length)
+        # NOTE: cfm_wrapper may be wrapped by accelerate/DDP later; here it's still raw
+        self.eval_stft = STFTMag(
+            nfft=cfm_wrapper.flowhigh.audio_enc_dec.n_fft,
+            hop=cfm_wrapper.flowhigh.audio_enc_dec.hop_length,
+            window_len=cfm_wrapper.flowhigh.audio_enc_dec.win_length,
+        )
         self.cfm_method = cfm_method
         self.weighted_loss = weighted_loss
         self.model_name = model_name
@@ -297,6 +302,15 @@ class FLowHighTrainer(nn.Module):
     def print(self, msg):
         self.accelerator.print(msg)
 
+    def _unwrap_cfm(self):
+        """
+        Get the underlying ConditionalFlowMatcherWrapper from accelerate/DDP wrappers.
+        """
+        try:
+            return self.accelerator.unwrap_model(self.cfm_wrapper)
+        except Exception:
+            return self.cfm_wrapper.module if hasattr(self.cfm_wrapper, "module") else self.cfm_wrapper
+
     def generate(self, *args, **kwargs):
         return self.cfm_wrapper.generate(*args, **kwargs)
 
@@ -349,8 +363,9 @@ class FLowHighTrainer(nn.Module):
 
             # Downsampled audio 
             HR_wave, wav_length, up_cond, random_sr = next(self.dataloader_iter)    
-            win_length = self.cfm_wrapper.flowhigh.audio_enc_dec.win_length
-            hop_length = self.cfm_wrapper.flowhigh.audio_enc_dec.hop_length         
+            cfm_unwrapped = self._unwrap_cfm()
+            win_length = cfm_unwrapped.flowhigh.audio_enc_dec.win_length
+            hop_length = cfm_unwrapped.flowhigh.audio_enc_dec.hop_length
             mel_lengths = torch.ceil((wav_length - win_length) / hop_length + 1) 
             up_cond = up_cond / up_cond.abs().max(dim=1, keepdim=True).values 
                

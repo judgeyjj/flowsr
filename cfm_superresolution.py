@@ -1,5 +1,4 @@
 import os
-print(os.getcwd())
 
 import math
 import logging

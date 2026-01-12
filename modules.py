@@ -1,5 +1,4 @@
 import os
-print(os.getcwd())
 
 import math
 import logging
@@ -11,7 +10,9 @@ import torch
 from torch import nn, Tensor, einsum, IntTensor, FloatTensor, BoolTensor
 from torch.nn import Module
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
+# NOTE: FlowHigh upstream uses `torch.cuda.amp.autocast(enabled=False)` decorators in a few helper fns.
+# In recent PyTorch this triggers FutureWarning. Since they are all `enabled=False`, we simply remove
+# the decorator usage (no functional change) to keep logs clean.
 from torch.nn.utils import weight_norm
 
 from beartype import beartype
@@ -111,7 +112,6 @@ class RotaryEmbedding(Module):
     def device(self):
         return self.inv_freq.device
 
-    @autocast(enabled = False)
     @beartype
     def forward(self, t: Union[int, Tensor]):
         if not torch.is_tensor(t):
@@ -126,7 +126,6 @@ def rotate_half(x):
     x1, x2 = x.chunk(2, dim = -1)
     return torch.cat((-x2, x1), dim = -1)
 
-@autocast(enabled = False)
 def apply_rotary_pos_emb(pos, t):
     return t * pos.cos() + rotate_half(t) * pos.sin()
 
