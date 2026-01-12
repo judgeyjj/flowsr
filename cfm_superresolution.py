@@ -939,22 +939,18 @@ class ConditionalFlowMatcherWrapper(Module):
         # Cut a small segment of mel-spectrogram
         cond_lengths = cond_lengths.to(torch.int32)
         max_cond_lengths = x1.size(1)
+        # Safety: clamp to available sequence length (after padding)
+        cond_lengths = cond_lengths.clamp(min=1, max=max_cond_lengths)
         x_mask = sequence_mask(cond_lengths, max_cond_lengths).unsqueeze(1) 
         out_size = 2* self.flowhigh.audio_enc_dec.sampling_rate // self.flowhigh.audio_enc_dec.hop_length
 
         # Cut a small segment of mel-spectrogram in order to increase batch size
         if not isinstance(out_size, type(None)):
-            max_offset = (cond_lengths - out_size).clamp(0)
-            offset_ranges = list( zip([0] * max_offset.shape[0], max_offset.cpu().numpy()))
-            
+            # NOTE:
+            # Upstream code builds out_offset via torch.tensor(...) which can create 1D tensors and break slicing,
+            # causing mismatched segment lengths (observed RuntimeError in assignment).
+            # Here we compute safe python ints per sample.
             import random
-
-            out_offset = torch.LongTensor(
-                [
-                    torch.tensor(random.choice(range(start, end)) if end > start else 0)
-                    for start, end in offset_ranges
-                ]
-            ).to(cond_lengths)
 
             w_cut = torch.zeros(w.shape[0], out_size, self.flowhigh.audio_enc_dec.n_mels, dtype=w.dtype, device=w.device)
             flow_cut = torch.zeros(flow.shape[0], out_size, self.flowhigh.audio_enc_dec.n_mels, dtype=flow.dtype, device=flow.device)
@@ -962,16 +958,25 @@ class ConditionalFlowMatcherWrapper(Module):
             
             x_cut_lengths = []
 
-            for i, (w_, flow_, cond_, out_offset_) in enumerate(zip(w, flow, cond, out_offset)):
+            for i, (w_, flow_, cond_) in enumerate(zip(w, flow, cond)):
                 
                 # w_.shape = flow_.shape = cond_.shape = [Time, channel]
-                x_cut_length = out_size + (cond_lengths[i] - out_size).clamp(None, 0)
+                li = int(cond_lengths[i].item())
+                x_cut_length = min(int(out_size), li)
                 x_cut_lengths.append(x_cut_length)
                 
-                cut_lower, cut_upper = out_offset_, out_offset_ + x_cut_length
-                w_cut[i, :x_cut_length,: ] = w_[cut_lower:cut_upper,: ]
-                flow_cut[i, :x_cut_length,: ] = flow_[cut_lower:cut_upper,: ]
-                cond_cut[i, :x_cut_length,: ] = cond_[cut_lower:cut_upper,: ]
+                max_off = max(0, li - x_cut_length)
+                cut_lower = 0 if max_off == 0 else random.randint(0, max_off)
+                cut_upper = cut_lower + x_cut_length
+                # final safety against any out-of-range due to padding mismatch
+                cut_upper = min(int(cut_upper), int(w_.shape[0]))
+                actual_len = int(cut_upper - cut_lower)
+                if actual_len <= 0:
+                    continue
+
+                w_cut[i, :actual_len, : ] = w_[cut_lower:cut_upper, : ]
+                flow_cut[i, :actual_len, : ] = flow_[cut_lower:cut_upper, : ]
+                cond_cut[i, :actual_len, : ] = cond_[cut_lower:cut_upper, : ]
 
             x_cut_lengths = torch.LongTensor(x_cut_lengths)
             x_cut_mask = sequence_mask(x_cut_lengths).unsqueeze(1).to(x_mask)
