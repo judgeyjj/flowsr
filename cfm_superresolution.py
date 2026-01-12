@@ -216,7 +216,14 @@ class MelVoco(AudioEncoderDecoder):
 
         global mel_basis, hann_window
         if self.f_max not in mel_basis:
-            mel = librosa_mel_fn(self.sampling_rate, self.n_fft, self.n_mels, self.f_min, self.f_max)
+            # librosa>=0.10 makes many params keyword-only; use explicit keywords for compatibility
+            mel = librosa_mel_fn(
+                sr=self.sampling_rate,
+                n_fft=self.n_fft,
+                n_mels=self.n_mels,
+                fmin=self.f_min,
+                fmax=self.f_max,
+            )
             mel_basis[str(self.f_max)+'_'+str(audio.device)] = torch.from_numpy(mel).float().to(audio.device)
             hann_window[str(audio.device)] = torch.hann_window(self.win_length).to(audio.device)
 
