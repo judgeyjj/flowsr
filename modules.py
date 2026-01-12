@@ -30,6 +30,19 @@ import matplotlib.pyplot as plt
 LOGGER = logging.getLogger(__file__)
 logging.basicConfig(filename='model_debug.log', level=logging.INFO)
 
+# ==========================================================
+# Mamba (DiM: Diffusion in Mamba)
+# - 仅使用官方 mamba_ssm.Mamba，不实现任何手写 SSM
+# - 非因果生成：采用双向 Mamba（forward + reverse）
+# ==========================================================
+
+try:
+    from mamba_ssm import Mamba as OfficialMamba
+    MAMBA_AVAILABLE = True
+except Exception:
+    OfficialMamba = None
+    MAMBA_AVAILABLE = False
+
 # helper functions
 
 def exists(val):
@@ -474,6 +487,110 @@ class AdaLayerNorm(nn.Module):
         scale, shift = map(lambda t: t.unsqueeze(1).expand_as(x), (scale, shift))
         x = x * scale + shift
         return x
+
+
+class BiDirectionalMambaBlock(Module):
+    """
+    双向 Mamba Block（用于非因果生成任务，如语音超分）
+
+    结构：
+      x -> AdaLN(cond) -> Mamba_fwd
+      x -> AdaLN(cond) -> reverse -> Mamba_bwd -> reverse
+      残差相加后再接一层 AdaLN + FFN
+
+    注意：严格依赖官方 mamba_ssm.Mamba，不做任何手写 SSM。
+    """
+
+    def __init__(
+        self,
+        *,
+        dim: int,
+        hidden_dim: int,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        ff_mult: int = 4,
+        ff_dropout: float = 0.0,
+    ):
+        super().__init__()
+        if not MAMBA_AVAILABLE:
+            raise ImportError("mamba_ssm is required for architecture='mamba'. Please install mamba-ssm.")
+
+        self.dim = int(dim)
+        self.hidden_dim = int(hidden_dim)
+
+        self.norm1 = AdaLayerNorm(self.dim, self.hidden_dim, eps=1e-6)
+        self.mamba_fwd = OfficialMamba(d_model=self.dim, d_state=int(d_state), d_conv=int(d_conv), expand=int(expand))
+        self.mamba_bwd = OfficialMamba(d_model=self.dim, d_state=int(d_state), d_conv=int(d_conv), expand=int(expand))
+
+        self.norm2 = AdaLayerNorm(self.dim, self.hidden_dim, eps=1e-6)
+        self.ff = FeedForward(self.dim, mult=ff_mult, dropout=ff_dropout)
+
+    def forward(self, x: torch.Tensor, *, cond: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            x: (B, N, D)
+            cond: (B, hidden_dim) time embedding
+            mask: (B, N) optional, True for valid tokens
+        """
+        if mask is not None:
+            x = x.masked_fill(~mask[..., None], 0.)
+
+        residual = x
+        x1 = self.norm1(x, cond)
+        y_fwd = self.mamba_fwd(x1)
+
+        x1_rev = torch.flip(x1, dims=[1])
+        y_bwd = self.mamba_bwd(x1_rev)
+        y_bwd = torch.flip(y_bwd, dims=[1])
+
+        x = residual + 0.5 * (y_fwd + y_bwd)
+
+        # FFN
+        x = x + self.ff(self.norm2(x, cond))
+
+        if mask is not None:
+            x = x.masked_fill(~mask[..., None], 0.)
+
+        return x
+
+
+class MambaStack(Module):
+    """
+    多层双向 Mamba 堆叠，接口对齐 Transformer，便于在 FLowHigh 中直接替换。
+    """
+
+    def __init__(
+        self,
+        *,
+        dim: int,
+        depth: int,
+        hidden_dim: int,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        ff_mult: int = 4,
+        ff_dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            BiDirectionalMambaBlock(
+                dim=dim,
+                hidden_dim=hidden_dim,
+                d_state=d_state,
+                d_conv=d_conv,
+                expand=expand,
+                ff_mult=ff_mult,
+                ff_dropout=ff_dropout,
+            )
+            for _ in range(int(depth))
+        ])
+        self.final_norm = nn.LayerNorm(int(dim), eps=1e-6)
+
+    def forward(self, x: torch.Tensor, *, cond: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x, cond=cond, mask=mask)
+        return self.final_norm(x)
 
 
 class ResBlock1(nn.Module):

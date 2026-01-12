@@ -21,7 +21,7 @@ from librosa.filters import mel as librosa_mel_fn
 from utils import sequence_mask
 import numpy
 import matplotlib.pyplot as plt
-from modules import LearnedSinusoidalPosEmb, ConvPositionEmbed, Transformer, ConvNeXtBlock
+from modules import LearnedSinusoidalPosEmb, ConvPositionEmbed, Transformer, ConvNeXtBlock, MambaStack
 from postprocessing import PostProcessing
 from init_vocoder import init_bigvgan
 
@@ -287,6 +287,10 @@ class FLowHigh(Module):
         attn_qk_norm = True,
         use_gateloop_layers = False,
         architecture = None,
+        # DiM (Diffusion in Mamba) hyperparams (keep defaults close to common Mamba configs)
+        mamba_d_state: int = 16,
+        mamba_d_conv: int = 4,
+        mamba_expand: int = 2,
     ):
         super().__init__()
         dim_in = default(dim_in, dim)
@@ -296,6 +300,8 @@ class FLowHigh(Module):
         if self.architecture=='transformer':
             time_hidden_dim = default(time_hidden_dim, dim)
         elif self.architecture=='convnext':
+            time_hidden_dim = default(time_hidden_dim, dim)
+        elif self.architecture=='mamba':
             time_hidden_dim = default(time_hidden_dim, dim)
         else:
             raise ValueError("Choose approriate architecture")
@@ -352,6 +358,19 @@ class FLowHigh(Module):
                 ]
             )
             self.final_layer_norm = nn.LayerNorm(dim, eps=1e-6)
+
+        elif self.architecture == 'mamba':
+            # MambaStack is bidirectional + AdaLN(cond=time_emb) per block
+            self.mamba = MambaStack(
+                dim=dim,
+                depth=depth,
+                hidden_dim=time_hidden_dim,
+                d_state=int(mamba_d_state),
+                d_conv=int(mamba_d_conv),
+                expand=int(mamba_expand),
+                ff_mult=int(ff_mult),
+                ff_dropout=float(ff_dropout),
+            )
     
         dim_out = dim_in
         self.to_pred = nn.Linear(dim, dim_out, bias = False)
@@ -466,6 +485,10 @@ class FLowHigh(Module):
         
             x = x.transpose(1,2)
             x = self.final_layer_norm(x)
+
+        elif self.architecture == 'mamba':
+            # mask is optional; pass to MambaStack so padded tokens are zeroed
+            x = self.mamba(x, cond=time_emb, mask=self_attn_mask)
 
         # Protect NaN
         logging.info(f"After transformer: {x}")
