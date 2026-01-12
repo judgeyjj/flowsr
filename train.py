@@ -5,7 +5,6 @@ import argparse
 import numpy as np
 import yaml
 import os
-from torch.utils.tensorboard import SummaryWriter
 import torchaudio 
 from torchinfo import summary
 from data import AudioDataset
@@ -17,6 +16,17 @@ from cfm_superresolution import (
 )
 
 from trainer import FLowHighTrainer
+
+def _is_rank0() -> bool:
+    # works for torchrun / accelerate
+    try:
+        return int(os.environ.get("RANK", "0")) == 0 and int(os.environ.get("LOCAL_RANK", "0")) == 0
+    except Exception:
+        return True
+
+def r0_print(*args, **kwargs):
+    if _is_rank0():
+        print(*args, **kwargs)
 
 def _to_namespace(d):
     return json.loads(json.dumps(d), object_hook=lambda x: SimpleNamespace(**x))
@@ -113,6 +123,11 @@ def _normalize_yaml_to_flowhigh_dict(cfg: dict) -> dict:
             'save_model_every': int(training.get('save_model_every', 100000)),
             'save_dir': str(save_dir or cfg.get('checkpoint_dir', 'results')),
             'weighted_loss': bool(training.get('weighted_loss', False)),
+            # logging / ddp knobs
+            'use_swanlab': bool(output.get('use_swanlab', False)),
+            'swanlab_project': str(output.get('swanlab_project', 'flowsr')),
+            'swanlab_log_interval_steps': int(output.get('swanlab_log_interval_steps', 0) or 0),
+            'ddp_find_unused_parameters': bool(training.get('ddp_find_unused_parameters', False)),
         }
     }
     return out
@@ -156,18 +171,17 @@ if __name__ == "__main__":
     torch.manual_seed(hparams.random_seed)
     np.random.seed(hparams.random_seed)
     
-    print('Num of current cuda devices:', n_gpus)
-    print('Initializing logger...')
-    logger = SummaryWriter(log_dir=hparams.train.save_dir)
+    r0_print('Num of current cuda devices:', n_gpus)
+    r0_print('Initializing logger...')
     
     
-    print('Initializing data loaders...')
+    r0_print('Initializing data loaders...')
     dataset= AudioDataset(folder=hparams.data.data_path, downsampling = hparams.data.downsampling_method)
     validset = AudioDataset(folder=hparams.data.valid_path, downsampling = hparams.data.downsampling_method, mode='valid')
 
     sampling_rates = list(range(hparams.data.downsample_min, hparams.data.downsample_max + 1000, 1000))
     
-    print(f'Initializing Mel vocoder...')
+    r0_print(f'Initializing Mel vocoder...')
     audio_enc_dec_type = MelVoco(n_mels= hparams.data.n_mel_channels, 
                                  sampling_rate= hparams.data.samplingrate, 
                                  f_max= hparams.data.mel_fmax, 
@@ -176,12 +190,14 @@ if __name__ == "__main__":
                                  hop_length= hparams.data.hop_length,
                                  vocoder= hparams.model.vocoder, 
                                  vocoder_config= hparams.model.vocoderconfigpath,
-                                 vocoder_path = hparams.model.vocoderpath
+                                 vocoder_path = hparams.model.vocoderpath,
+                                 # DDP startup optimization: training does not need vocoder decode
+                                 load_vocoder_on_init=False
     )        
     # audio_enc_dec_type = LinearVoco()
     # audio_enc_dec_type = SpecVoco()
         
-    print('Initializing FLowHigh...')
+    r0_print('Initializing FLowHigh...')
     model = FLowHigh(
                     architecture=hparams.model.architecture,
                     dim_in= hparams.data.n_mel_channels, # Same with Mel-bins 
@@ -190,16 +206,20 @@ if __name__ == "__main__":
                     depth= hparams.model.n_layers, 
                     dim_head= hparams.model.dim_head, 
                     heads= hparams.model.n_heads,
+                    mamba_d_state=getattr(hparams.model, 'mamba_d_state', 16),
+                    mamba_d_conv=getattr(hparams.model, 'mamba_d_conv', 4),
+                    mamba_expand=getattr(hparams.model, 'mamba_expand', 2),
                     )
     
-    print('Initializing CFM Wrapper...')
+    r0_print('Initializing CFM Wrapper...')
     cfm_wrapper = ConditionalFlowMatcherWrapper(flowhigh= model,
                                                 cfm_method= hparams.model.cfm_path,
                                                 sigma= hparams.model.sigma)
     
-    summary(cfm_wrapper)
+    if _is_rank0():
+        summary(cfm_wrapper)
 
-    print('Initializing FLowHigh Trainer...')
+    r0_print('Initializing FLowHigh Trainer...')
     # Prefer epoch-based training if provided by sr/config.yaml; otherwise fall back to step-based
     num_epochs = getattr(hparams.train, 'num_epochs', 0) if hasattr(hparams, 'train') else 0
     num_epochs = int(num_epochs) if num_epochs else None
@@ -226,10 +246,13 @@ if __name__ == "__main__":
                               cfm_method = hparams.model.cfm_path,
                               weighted_loss = hparams.train.weighted_loss,
                               model_name = hparams.model.modelname,
-                              tensorboard_logger = logger,
+                              use_swanlab=getattr(hparams.train, 'use_swanlab', False),
+                              swanlab_project=getattr(hparams.train, 'swanlab_project', 'flowsr'),
+                              swanlab_log_interval_steps=getattr(hparams.train, 'swanlab_log_interval_steps', 0),
+                              ddp_find_unused_parameters=getattr(hparams.train, 'ddp_find_unused_parameters', False),
                               )
     
-    print('Start training...')
+    r0_print('Start training...')
     trainer.train()
     
 

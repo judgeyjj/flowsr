@@ -178,7 +178,8 @@ class MelVoco(AudioEncoderDecoder):
         hop_length = 480,
         vocoder = str,
         vocoder_config = './vocoder_config.json',
-        vocoder_path = None
+        vocoder_path = None,
+        load_vocoder_on_init: bool = True,
     ):
         super().__init__()
         self.log = log
@@ -189,10 +190,14 @@ class MelVoco(AudioEncoderDecoder):
         self.win_length = win_length
         self.hop_length = hop_length
         self.sampling_rate = sampling_rate
+        self.vocoder_config = vocoder_config
+        self.vocoder_path = vocoder_path
         
         if vocoder == 'bigvgan':
             self.vocoder_name = vocoder
-            self.vocoder = init_bigvgan(vocoder_config, vocoder_path, vocoder_freeze=True)
+            self.vocoder = None
+            if bool(load_vocoder_on_init):
+                self.vocoder = init_bigvgan(vocoder_config, vocoder_path, vocoder_freeze=True)
         else:
             raise ValueError("unsuitable vocoder name")
 
@@ -262,7 +267,10 @@ class MelVoco(AudioEncoderDecoder):
         # if self.log:
         #     mel = DB_to_amplitude(mel, ref = 1., power = 0.5)
 
-        if self.vocoder_name == 'bigvgan':  
+        if self.vocoder_name == 'bigvgan':
+            if self.vocoder is None:
+                # Lazy init (helps DDP startup): vocoder is only needed for decoding / saving samples
+                self.vocoder = init_bigvgan(self.vocoder_config, self.vocoder_path, vocoder_freeze=True)
             return self.vocoder.forward(mel)
 
 

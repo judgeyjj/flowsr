@@ -3,6 +3,7 @@ from pathlib import Path
 from shutil import rmtree
 from functools import partial
 from contextlib import nullcontext
+import sys
 
 from beartype import beartype
 
@@ -24,7 +25,6 @@ from tqdm import tqdm
 import random
 import torchaudio
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 from utils import plot_tensor, save_plot_
 from einops import rearrange
 from scipy.signal import sosfiltfilt, cheby1, resample, resample_poly
@@ -33,6 +33,14 @@ import librosa
 import math
 import os
 import matplotlib.pyplot as plt
+
+# SwanLab (optional)
+try:
+    import swanlab
+    SWANLAB_AVAILABLE = True
+except Exception:
+    swanlab = None
+    SWANLAB_AVAILABLE = False
 
 # helpers
 
@@ -51,6 +59,16 @@ def cast_tuple(t):
     return t if isinstance(t, (tuple, list)) else (t,)
 
 def yes_or_no(question):
+    """
+    Non-interactive safe prompt.
+    - If running in a non-interactive environment (no TTY), default to 'no' to avoid hanging.
+    """
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except Exception:
+        return False
+
     answer = input(f'{question} (y/n) ')
     return answer.lower() in ('yes', 'y')
 
@@ -87,16 +105,24 @@ class FLowHighTrainer(nn.Module):
         force_clear_prev_results = None, split_batches = False, drop_last = False, 
         accelerate_kwargs: dict = dict(),
         original_sampling_rate = None, 
-        tensorboard_logger = SummaryWriter,
         downsampling : str,
         sampling_rates : list,
         cfm_method = str,
         weighted_loss = False,
-        model_name = str
+        model_name = str,
+        # logging
+        use_swanlab: bool = False,
+        swanlab_project: str = "flowsr",
+        swanlab_log_interval_steps: int = 0,
+        # ddp
+        ddp_find_unused_parameters: bool = False,
     ):
         super().__init__()
 
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters = True)
+        ddp_kwargs = DistributedDataParallelKwargs(
+            find_unused_parameters=bool(ddp_find_unused_parameters),
+            gradient_as_bucket_view=True,
+        )
         self.accelerator = Accelerator(
             kwargs_handlers = [ddp_kwargs],
             split_batches = split_batches,
@@ -189,7 +215,9 @@ class FLowHighTrainer(nn.Module):
         }
         self.accelerator.init_trackers("flowhigh", config=acc_hps)
         self.original_sampling_rate = original_sampling_rate
-        self.tensorboard_logger = tensorboard_logger
+        self.use_swanlab = bool(use_swanlab) and SWANLAB_AVAILABLE
+        self.swanlab_project = str(swanlab_project)
+        self.swanlab_log_interval_steps = int(swanlab_log_interval_steps or 0)
         self.downsampling = downsampling
         self.sampling_rates = sampling_rates
         self.eval_stft = STFTMag(nfft=cfm_wrapper.flowhigh.audio_enc_dec.n_fft,
@@ -198,6 +226,27 @@ class FLowHighTrainer(nn.Module):
         self.cfm_method = cfm_method
         self.weighted_loss = weighted_loss
         self.model_name = model_name
+
+        # SwanLab init (rank0 only)
+        if self.use_swanlab and self.is_main:
+            # experiment name == results folder name
+            exp_name = str(Path(results_folder).name)
+            try:
+                swanlab.init(
+                    project=self.swanlab_project,
+                    experiment_name=exp_name,
+                    config={
+                        "num_train_steps": self.num_train_steps,
+                        "num_warmup_steps": self.num_warmup_steps,
+                        "learning_rate": self.lr,
+                        "initial_learning_rate": self.initial_lr,
+                        "wd": wd,
+                        "ddp_find_unused_parameters": bool(ddp_find_unused_parameters),
+                    },
+                )
+            except Exception as e:
+                self.print(f"[SwanLab] init failed: {e}")
+                self.use_swanlab = False
 
     def save_validset_txt(self):
         valid_data_paths = [self.ds[idx][1] for idx in self.valid_ds.indices]
@@ -304,10 +353,24 @@ class FLowHighTrainer(nn.Module):
         current_lr = self.scheduler.get_last_lr()[0]
 
         # tensorboard logging
-        if self.is_main and not (steps % 10): 
-            
-            self.tensorboard_logger.add_scalar('training/cfm_loss', loss/self.grad_accum_every, global_step = steps)
-            self.tensorboard_logger.add_scalar('training/lr',current_lr,global_step = steps)
+        if self.use_swanlab and self.is_main:
+            if self.swanlab_log_interval_steps <= 0:
+                # default: every 10 steps like old tensorboard behavior
+                log_every = 10
+            else:
+                log_every = self.swanlab_log_interval_steps
+
+            if not (steps % log_every):
+                try:
+                    swanlab.log(
+                        {
+                            "train/cfm_loss": float(loss.item() / self.grad_accum_every),
+                            "train/lr": float(current_lr),
+                        },
+                        step=int(steps),
+                    )
+                except Exception as e:
+                    self.print(f"[SwanLab] log failed: {e}")
         
         # log
         if not steps % self.log_every:
