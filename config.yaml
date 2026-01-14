@@ -91,15 +91,50 @@ bandwidth:
   butter_order: 4          # 推理端 bandwidth_sub 滤波器阶数
   transition_ms: 100       # 推理端 bandwidth_sub 起始交叉淡入长度（毫秒）
 
-# 推理配置（对齐 ClearerVoice inference.yaml）
+# 推理配置
 inference:
-  checkpoint: null         # checkpoint 路径（null 则从命令行读取）
-  input: null              # 输入音频/目录（null 则从命令行读取）
-  output: null             # 输出路径（null 则从命令行读取）
+  # 路径配置
+  checkpoint: null                # checkpoint 路径
+  input_path: null                # 输入音频目录（高分辨率音频）
+  output_path: null               # 输出音频目录
+  gt_path: null                   # ground truth路径，用于计算指标（可与input_path相同）
+  
+  # 设备配置
   device: 'cuda'
-  chunk_seconds: null      # 长音频分块处理长度（秒）；null 则整段处理
-  simulate_low_sr: null    # 模拟低分辨率输入（downsample→upsample）；null 则不模拟
-  bandwidth_sub: true      # 推理后是否做低频替换（lowpass(LR)+highpass(pred)）
+  
+  # 采样率配置
+  target_sampling_rate: 48000     # 目标采样率
+  simulate_low_sr: 16000          # 模拟低分辨率采样率（会先将高分辨率下采样到此采样率）
+  
+  # 推理方法配置
+  up_sampling_method: 'scipy'     # 上采样方法: scipy, librosa, torchaudio
+  architecture: 'mamba'           # 架构: mamba, transformer, convnext
+  time_step: 4                    # ODE求解步数
+  cfm_method: 'independent_cfm_adaptive'  # CFM方法
+  ode_method: 'euler'             # ODE求解方法: euler, midpoint
+  sigma: 1e-4                     # 标准差
+  
+  # 模型参数
+  n_layers: 2                     # 层数
+  n_heads: 16                     # 注意力头数
+  dim_head: 64                    # 每个头的维度
+  dim: 1024                       # 模型维度
+  
+  # 音频处理参数
+  n_mels: 256                     # Mel频带数
+  f_max: 24000                    # 最大频率
+  n_fft: 2048                     # FFT大小
+  win_length: 2048                # 窗口长度
+  hop_length: 480                 # 跳跃长度
+  
+  # Vocoder配置
+  vocoder: 'bigvgan'              # Vocoder类型
+  vocoder_path: 'vocoder/BIGVGAN/checkpoint/g_48_00850000'
+  vocoder_config_path: 'vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json'
+  
+  # 其他配置
+  chunk_seconds: null             # 长音频分块处理长度（秒）
+  compute_metrics: true           # 是否计算客观指标
 
 # 早停配置（可选，ClearerVoice 默认不启用）
 training:

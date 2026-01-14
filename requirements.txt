@@ -16,3 +16,5 @@ tqdm
 mamba-ssm
 pyyaml
 swanlab
+pesq
+pystoi
