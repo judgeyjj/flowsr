@@ -117,20 +117,16 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             # 归一化
             cond /= np.max(np.abs(cond)) + 1e-8
             
-            # 转换为tensor（确保使用float32）
+            # 转换为tensor（确保 float32 / contiguous / 正确 device）
             if isinstance(cond, np.ndarray):
-                cond = torch.from_numpy(cond).float().unsqueeze(0)
-            cond = cond.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+                cond = torch.from_numpy(cond).float()
+            if cond.ndim == 1:
+                cond = cond.unsqueeze(0)
+            cond = cond.contiguous()
+            cond = cond.to(cfm_wrapper.device)
 
-            # 使用CFM进行超分辨率重建
-            if cfm_method == 'basic_cfm':
-                HR_audio = cfm_wrapper.sample(cond = cond, time_steps = timestep, cfm_method = cfm_method)
-            elif cfm_method == 'independent_cfm_adaptive':
-                HR_audio = cfm_wrapper.sample(cond = cond, time_steps = timestep, cfm_method = cfm_method, std_2 = 1.) 
-            elif cfm_method == 'independent_cfm_constant':
-                HR_audio = cfm_wrapper.sample(cond = cond, time_steps = timestep, cfm_method = cfm_method)
-            elif cfm_method == 'independent_cfm_mix':
-                HR_audio = cfm_wrapper.sample(cond = cond, time_steps = timestep, cfm_method = cfm_method) 
+            # 使用CFM进行超分辨率重建（不要手工传 std_1/std_2，保持与训练/默认一致）
+            HR_audio = cfm_wrapper.sample(cond=cond, time_steps=timestep, cfm_method=cfm_method)
 
             HR_audio = HR_audio.squeeze(1) # [1, T]
 

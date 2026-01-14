@@ -688,27 +688,31 @@ class ConditionalFlowMatcherWrapper(Module):
                 out = rearrange(out, 'b ... -> b (...)')
             return out # out.shape : [1, Time, mel_channel]
 
+        # ensure everything stays on the same device as the model / cond
+        device = self.device
+        cond = cond.to(device)
+
         if cfm_method == 'basic_cfm': 
-            y0 = torch.randn_like(cond).cuda()
+            y0 = torch.randn_like(cond)
 
         elif cfm_method == 'independent_cfm_adaptive':
             # y0 from intended prior
-            epsilon = torch.randn_like(cond).cuda()
+            epsilon = torch.randn_like(cond)
             y0 = cond*std_1 + epsilon*std_2
 
         elif cfm_method == 'independent_cfm_constant':
             # y0 from intended prior
-            epsilon = torch.randn_like(cond).cuda()
+            epsilon = torch.randn_like(cond)
             y0 = cond*std_1 + epsilon*std_2
     
         elif cfm_method == 'independent_cfm_mix':
             # y0 from intended prior
-            epsilon = torch.randn_like(cond).cuda()
+            epsilon = torch.randn_like(cond)
             y0_low = cond*std_1 + epsilon*std_2
             y0_high = epsilon
             y0, _ = self.mel_replace_ops(y0_high, y0_low, cutoff_bins)
             
-        t = torch.linspace(0, 1, time_steps + 1, device = self.device).cuda()
+        t = torch.linspace(0, 1, time_steps + 1, device = device)
         if not self.use_torchode:
 
             LOGGER.debug('sampling with torchdiffeq')
