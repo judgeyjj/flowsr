@@ -21,6 +21,14 @@ class PostProcessing:
     
     def post_processing(self, pred, src, length):
         # pred, src : [1, Time]
+        # 关闭低频替换，直接返回模型预测
+        audio = pred[:, :length]
+        audio = audio / torch.abs(audio).max() * 0.99
+        return audio
+        
+    def post_processing_with_replacement(self, pred, src, length):
+        # pred, src : [1, Time]
+        # 原始的低频替换策略（已禁用）
         assert len(pred.shape) == 2 and len(src.shape) == 2 
         
         spec_pred = self.stft(pred) # [1, Channel, Time]

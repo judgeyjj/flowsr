@@ -15,6 +15,14 @@ try:
 except ImportError:
     STOI_AVAILABLE = False
 
+try:
+    from visqol import visqol_lib_py
+    from visqol.pb2 import visqol_config_pb2
+    from visqol.pb2 import similarity_result_pb2
+    VISQOL_AVAILABLE = True
+except ImportError:
+    VISQOL_AVAILABLE = False
+
 
 def compute_lsd(
     pred: torch.Tensor,
@@ -230,6 +238,76 @@ def compute_stoi(
     return float(score)
 
 
+def compute_visqol(
+    pred: Union[torch.Tensor, np.ndarray],
+    target: Union[torch.Tensor, np.ndarray],
+    sr: int = 48000,
+    mode: str = 'audio'
+) -> float:
+    """
+    计算ViSQOL (Virtual Speech Quality Objective Listener)
+    
+    Args:
+        pred: 预测波形
+        target: 目标波形
+        sr: 采样率
+        mode: 'audio' (音频模式) 或 'speech' (语音模式)
+        
+    Returns:
+        visqol_score: ViSQOL MOS-LQO分数 (1-5)
+    """
+    if not VISQOL_AVAILABLE:
+        print("Warning: visqol not installed, returning 0.0")
+        return 0.0
+        
+    if isinstance(pred, torch.Tensor):
+        pred = pred.detach().cpu().numpy()
+    if isinstance(target, torch.Tensor):
+        target = target.detach().cpu().numpy()
+        
+    if pred.ndim > 1:
+        pred = pred.reshape(-1)
+    if target.ndim > 1:
+        target = target.reshape(-1)
+    
+    # 确保长度一致
+    min_len = min(len(pred), len(target))
+    pred = pred[:min_len]
+    target = target[:min_len]
+    
+    # 归一化到 [-1, 1]
+    pred = pred / (np.abs(pred).max() + 1e-8)
+    target = target / (np.abs(target).max() + 1e-8)
+        
+    try:
+        # 创建ViSQOL配置
+        config = visqol_config_pb2.VisqolConfig()
+        if mode == 'audio':
+            config.audio.sample_rate = sr
+            config.options.use_speech_scoring = False
+            svr_model_path = "libsvm_nu_svr_model.txt"
+        else:  # speech mode
+            config.audio.sample_rate = sr
+            config.options.use_speech_scoring = True
+            svr_model_path = "lattice_tcditugenmeetpackhref_ls2_nl60_lr12_bs2048_learn.005_ep2400_train1_7_raw.tflite"
+        
+        config.options.svr_model_path = svr_model_path
+        
+        # 创建ViSQOL API
+        api = visqol_lib_py.VisqolApi()
+        api.Create(config)
+        
+        # 计算ViSQOL
+        similarity_result = api.Measure(target.astype(np.float64), pred.astype(np.float64))
+        score = similarity_result.moslqo
+        
+    except Exception as e:
+        print(f"Warning: ViSQOL computation failed: {e}")
+        score = 0.0
+        
+    return float(score)
+
+
 def compute_all_metrics(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -292,6 +370,13 @@ def compute_all_metrics(
     except Exception as e:
         print(f"Warning: STOI computation failed: {e}")
         metrics['STOI'] = 0.0
+    
+    # ViSQOL
+    try:
+        metrics['ViSQOL'] = compute_visqol(pred_t, target_t, sr=sr, mode='audio')
+    except Exception as e:
+        print(f"Warning: ViSQOL computation failed: {e}")
+        metrics['ViSQOL'] = 0.0
     
     return metrics
 
