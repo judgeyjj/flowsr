@@ -117,9 +117,9 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             # 归一化
             cond /= np.max(np.abs(cond)) + 1e-8
             
-            # 转换为tensor
+            # 转换为tensor（确保使用float32）
             if isinstance(cond, np.ndarray):
-                cond = torch.tensor(cond).unsqueeze(0)
+                cond = torch.from_numpy(cond).float().unsqueeze(0)
             cond = cond.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
 
             # 使用CFM进行超分辨率重建
