@@ -253,31 +253,42 @@ def compute_all_metrics(
         metrics: 包含所有指标的字典
     """
     metrics = {}
+
+    # 统一 device / dtype，避免 LSD / SI-SNR 出现 CPU<->CUDA 混用报错
+    pred_t = pred
+    target_t = target
+    if isinstance(pred_t, torch.Tensor) and isinstance(target_t, torch.Tensor):
+        # use float32 for numeric stability / speed
+        pred_t = pred_t.detach().float()
+        target_t = target_t.detach().float()
+        # align device (prefer pred device)
+        if pred_t.device != target_t.device:
+            target_t = target_t.to(pred_t.device)
     
     # LSD
     try:
-        metrics['LSD'] = compute_lsd(pred, target, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+        metrics['LSD'] = compute_lsd(pred_t, target_t, n_fft=n_fft, hop_length=hop_length, win_length=win_length)
     except Exception as e:
         print(f"Warning: LSD computation failed: {e}")
         metrics['LSD'] = 0.0
     
     # SI-SNR
     try:
-        metrics['SI-SNR'] = compute_sisnr(pred, target)
+        metrics['SI-SNR'] = compute_sisnr(pred_t, target_t)
     except Exception as e:
         print(f"Warning: SI-SNR computation failed: {e}")
         metrics['SI-SNR'] = 0.0
     
     # PESQ (需要16k或8k)
     try:
-        metrics['PESQ'] = compute_pesq(pred, target, sr=sr)
+        metrics['PESQ'] = compute_pesq(pred_t, target_t, sr=sr)
     except Exception as e:
         print(f"Warning: PESQ computation failed: {e}")
         metrics['PESQ'] = 0.0
     
     # STOI
     try:
-        metrics['STOI'] = compute_stoi(pred, target, sr=sr)
+        metrics['STOI'] = compute_stoi(pred_t, target_t, sr=sr)
     except Exception as e:
         print(f"Warning: STOI computation failed: {e}")
         metrics['STOI'] = 0.0
