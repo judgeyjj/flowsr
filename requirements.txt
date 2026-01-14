@@ -18,4 +18,3 @@ pyyaml
 swanlab
 pesq
 pystoi
-visqol

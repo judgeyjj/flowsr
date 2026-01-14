@@ -69,7 +69,7 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
     print("="*70)
     
     # 用于累积指标
-    all_metrics = {'LSD': [], 'SI-SNR': [], 'PESQ': [], 'STOI': [], 'ViSQOL': []}
+    all_metrics = {'LSD': [], 'SI-SNR': [], 'PESQ': [], 'STOI': []}
     # 用于累积RTF
     all_rtf = []
     all_audio_durations = []

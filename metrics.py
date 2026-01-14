@@ -15,13 +15,8 @@ try:
 except ImportError:
     STOI_AVAILABLE = False
 
-try:
-    from visqol import visqol_lib_py
-    from visqol.pb2 import visqol_config_pb2
-    from visqol.pb2 import similarity_result_pb2
-    VISQOL_AVAILABLE = True
-except ImportError:
-    VISQOL_AVAILABLE = False
+# ViSQOL需要预训练模型文件且安装复杂，暂时禁用
+VISQOL_AVAILABLE = False
 
 
 def compute_lsd(
@@ -238,87 +233,8 @@ def compute_stoi(
     return float(score)
 
 
-def compute_visqol(
-    pred: Union[torch.Tensor, np.ndarray],
-    target: Union[torch.Tensor, np.ndarray],
-    sr: int = 48000,
-    mode: str = 'speech'
-) -> float:
-    """
-    计算ViSQOL (Virtual Speech Quality Objective Listener)
-    使用官方Google ViSQOL API
-    
-    Args:
-        pred: 预测波形
-        target: 目标波形
-        sr: 采样率
-        mode: 'audio' (音频模式，48kHz) 或 'speech' (语音模式，16kHz，默认)
-        
-    Returns:
-        visqol_score: ViSQOL MOS-LQO分数 (1-5)
-    """
-    if not VISQOL_AVAILABLE:
-        print("Warning: visqol not installed, returning 0.0")
-        print("Install with: pip install visqol")
-        return 0.0
-        
-    if isinstance(pred, torch.Tensor):
-        pred = pred.detach().cpu().numpy()
-    if isinstance(target, torch.Tensor):
-        target = target.detach().cpu().numpy()
-        
-    if pred.ndim > 1:
-        pred = pred.reshape(-1)
-    if target.ndim > 1:
-        target = target.reshape(-1)
-    
-    # 确保长度一致
-    min_len = min(len(pred), len(target))
-    pred = pred[:min_len]
-    target = target[:min_len]
-    
-    # 归一化到 [-1, 1]
-    pred = pred / (np.abs(pred).max() + 1e-8)
-    target = target / (np.abs(target).max() + 1e-8)
-    
-    # ViSQOL语音模式需要16kHz，音频模式需要48kHz
-    if mode == 'speech' and sr != 16000:
-        import librosa
-        pred = librosa.resample(pred, orig_sr=sr, target_sr=16000)
-        target = librosa.resample(target, orig_sr=sr, target_sr=16000)
-        sr = 16000
-    elif mode == 'audio' and sr != 48000:
-        import librosa
-        pred = librosa.resample(pred, orig_sr=sr, target_sr=48000)
-        target = librosa.resample(target, orig_sr=sr, target_sr=48000)
-        sr = 48000
-        
-    try:
-        # 创建ViSQOL配置（官方API）
-        config = visqol_config_pb2.VisqolConfig()
-        config.audio.sample_rate = sr
-        
-        if mode == 'speech':
-            # 语音模式：16kHz
-            config.options.use_speech_scoring = True
-        else:
-            # 音频模式：48kHz
-            config.options.use_speech_scoring = False
-        
-        # 创建ViSQOL API
-        api = visqol_lib_py.VisqolApi()
-        api.Create(config)
-        
-        # 计算ViSQOL（官方API：reference在前，degraded在后）
-        similarity_result = api.Measure(target.astype(np.float64), pred.astype(np.float64))
-        score = similarity_result.moslqo
-        
-    except Exception as e:
-        print(f"Warning: ViSQOL computation failed: {e}")
-        print(f"Make sure visqol is properly installed and model files are available")
-        score = 0.0
-        
-    return float(score)
+# ViSQOL 已禁用（需要预训练模型文件且安装复杂）
+# 如需使用，请手动安装 visqol 并提供模型文件
 
 
 def compute_all_metrics(
@@ -384,12 +300,8 @@ def compute_all_metrics(
         print(f"Warning: STOI computation failed: {e}")
         metrics['STOI'] = 0.0
     
-    # ViSQOL (语音模式)
-    try:
-        metrics['ViSQOL'] = compute_visqol(pred_t, target_t, sr=sr, mode='speech')
-    except Exception as e:
-        print(f"Warning: ViSQOL computation failed: {e}")
-        metrics['ViSQOL'] = 0.0
+    # ViSQOL 已禁用（需要预训练模型且安装复杂）
+    # metrics['ViSQOL'] = 0.0
     
     return metrics
 
