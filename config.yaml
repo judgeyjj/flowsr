@@ -94,7 +94,7 @@ bandwidth:
 # 推理配置
 inference:
   # 路径配置
-  checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/Flowhigh.300000.pt'
+  checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt'
   input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'
   output_path: './output'
   gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'

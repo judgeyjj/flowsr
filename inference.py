@@ -324,7 +324,8 @@ def main():
         sigma=inf_cfg['sigma']
     )
     
-    cfm_wrapper.load_state_dict(model_checkpoint['model'])
+    # 加载checkpoint（strict=False因为vocoder在训练时未保存，会从单独的vocoder文件加载）
+    cfm_wrapper.load_state_dict(model_checkpoint['model'], strict=False)
 
     print(f'设置模型为评估模式...')       
     SR_generator = SR_generator.to(device).eval()
