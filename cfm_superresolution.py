@@ -1005,8 +1005,3 @@ class ConditionalFlowMatcherWrapper(Module):
             cutoff_bins = cutoff_bins 
         )
         return loss
-
-
-        )
-        return loss
-
