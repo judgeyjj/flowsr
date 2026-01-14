@@ -698,17 +698,23 @@ class ConditionalFlowMatcherWrapper(Module):
         elif cfm_method == 'independent_cfm_adaptive':
             # y0 from intended prior
             epsilon = torch.randn_like(cond)
-            y0 = cond*std_1 + epsilon*std_2
+            std_1_t = torch.tensor(float(std_1), device=cond.device, dtype=cond.dtype)
+            std_2_t = torch.tensor(float(std_2), device=cond.device, dtype=cond.dtype)
+            y0 = cond * std_1_t + epsilon * std_2_t
 
         elif cfm_method == 'independent_cfm_constant':
             # y0 from intended prior
             epsilon = torch.randn_like(cond)
-            y0 = cond*std_1 + epsilon*std_2
+            std_1_t = torch.tensor(float(std_1), device=cond.device, dtype=cond.dtype)
+            std_2_t = torch.tensor(float(std_2), device=cond.device, dtype=cond.dtype)
+            y0 = cond * std_1_t + epsilon * std_2_t
     
         elif cfm_method == 'independent_cfm_mix':
             # y0 from intended prior
             epsilon = torch.randn_like(cond)
-            y0_low = cond*std_1 + epsilon*std_2
+            std_1_t = torch.tensor(float(std_1), device=cond.device, dtype=cond.dtype)
+            std_2_t = torch.tensor(float(std_2), device=cond.device, dtype=cond.dtype)
+            y0_low = cond * std_1_t + epsilon * std_2_t
             y0_high = epsilon
             y0, _ = self.mel_replace_ops(y0_high, y0_low, cutoff_bins)
             
