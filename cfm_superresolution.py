@@ -1006,3 +1006,7 @@ class ConditionalFlowMatcherWrapper(Module):
         )
         return loss
 
+
+        )
+        return loss
+

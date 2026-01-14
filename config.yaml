@@ -6,7 +6,7 @@
 
 # 通用配置（纯监督 SR：UNet 一次前向）
 device: 'cuda'
-gpu_ids: '0'  # 指定使用的 GPU 卡号，用逗号分隔，如 '0,1' 或 '4,5,6,7'
+gpu_ids: '0,1,2'  # 指定使用的 GPU 卡号，用逗号分隔，如 '0,1' 或 '4,5,6,7'
 seed: 42
 num_epochs: 100
 val_interval: 1
@@ -95,9 +95,9 @@ bandwidth:
 inference:
   # 路径配置
   checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt'
-  input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'
+  input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
   output_path: './output'
-  gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'
+  gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
   
   # 设备配置
   device: 'cuda'
