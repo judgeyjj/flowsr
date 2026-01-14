@@ -16,6 +16,7 @@ import scipy
 from torchinfo import summary
 from metrics import compute_all_metrics
 import yaml
+import time
 
 
 def load_config(config_path):
@@ -69,6 +70,10 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
     
     # 用于累积指标
     all_metrics = {'LSD': [], 'SI-SNR': [], 'PESQ': [], 'STOI': []}
+    # 用于累积RTF
+    all_rtf = []
+    all_audio_durations = []
+    all_inference_times = []
     
     with torch.no_grad():
         
@@ -78,8 +83,14 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             audio_file_name = os.path.basename(wav_file).replace('.wav','')
             save_dir = os.path.join(output_dir, f'{audio_file_name}.wav')
             
+            # 记录推理开始时间
+            start_time = time.time()
+            
             # 加载高分辨率音频
             audio_hr, sr_original = librosa.load(wav_file, sr=None, mono=True)
+            
+            # 计算音频时长（秒）
+            audio_duration = len(audio_hr) / sr_original
             
             # 如果启用了模拟低采样率，先下采样
             if simulate_low_sr is not None and simulate_low_sr > 0:
@@ -130,6 +141,22 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             HR_audio_pp_npy = (HR_audio_pp.cpu().squeeze().clamp(-1,1).numpy()*32767.0).astype(np.int16) 
             write(save_dir, target_sr, HR_audio_pp_npy)
             
+            # 记录推理结束时间并计算RTF
+            end_time = time.time()
+            inference_time = end_time - start_time
+            rtf = inference_time / audio_duration
+            
+            # 累积RTF统计
+            all_rtf.append(rtf)
+            all_audio_durations.append(audio_duration)
+            all_inference_times.append(inference_time)
+            
+            # 打印RTF信息
+            print(f"\n{audio_file_name} RTF:")
+            print(f"  音频时长: {audio_duration:.2f}s")
+            print(f"  推理时间: {inference_time:.2f}s")
+            print(f"  RTF: {rtf:.4f}")
+            
             # 计算客观指标（如果启用）
             if gt_path and compute_metrics_flag:
                 # 查找对应的ground truth文件
@@ -163,19 +190,39 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
                                 all_metrics[key].append(metrics[key])
                         
                         # 打印当前音频的指标
-                        print(f"\n{audio_file_name} 指标:")
+                        print(f"  客观指标:")
                         for key, value in metrics.items():
-                            print(f"  {key}: {value:.4f}")
+                            print(f"    {key}: {value:.4f}")
                             
                     except Exception as e:
                         print(f"警告: 无法计算 {audio_file_name} 的指标: {e}")
                 else:
                     print(f"警告: 未找到 {audio_file_name} 的ground truth文件")
     
+    # 打印平均RTF统计
+    if len(all_rtf) > 0:
+        print("\n" + "="*70)
+        print("RTF统计:")
+        print("="*70)
+        avg_rtf = np.mean(all_rtf)
+        std_rtf = np.std(all_rtf)
+        min_rtf = np.min(all_rtf)
+        max_rtf = np.max(all_rtf)
+        total_audio_duration = np.sum(all_audio_durations)
+        total_inference_time = np.sum(all_inference_times)
+        
+        print(f"平均RTF: {avg_rtf:.4f} ± {std_rtf:.4f}")
+        print(f"最小RTF: {min_rtf:.4f}")
+        print(f"最大RTF: {max_rtf:.4f}")
+        print(f"总音频时长: {total_audio_duration:.2f}s")
+        print(f"总推理时间: {total_inference_time:.2f}s")
+        print(f"整体RTF: {total_inference_time / total_audio_duration:.4f}")
+        print("="*70)
+    
     # 打印平均指标
     if gt_path and compute_metrics_flag and any(len(v) > 0 for v in all_metrics.values()):
         print("\n" + "="*70)
-        print("平均指标:")
+        print("平均客观指标:")
         print("="*70)
         for key, values in all_metrics.items():
             if len(values) > 0:

@@ -94,10 +94,10 @@ bandwidth:
 # 推理配置
 inference:
   # 路径配置
-  checkpoint: null                # checkpoint 路径
-  input_path: null                # 输入音频目录（高分辨率音频）
-  output_path: null               # 输出音频目录
-  gt_path: null                   # ground truth路径，用于计算指标（可与input_path相同）
+  checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/Flowhigh.300000.pt'
+  input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'
+  output_path: './output'
+  gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/test'
   
   # 设备配置
   device: 'cuda'
@@ -129,8 +129,8 @@ inference:
   
   # Vocoder配置
   vocoder: 'bigvgan'              # Vocoder类型
-  vocoder_path: 'vocoder/BIGVGAN/checkpoint/g_48_00850000'
-  vocoder_config_path: 'vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json'
+  vocoder_path: '/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/checkpoint/g_48_00850000'
+  vocoder_config_path: '/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json'
   
   # 其他配置
   chunk_seconds: null             # 长音频分块处理长度（秒）
