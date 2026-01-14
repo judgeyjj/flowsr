@@ -103,7 +103,7 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
                 # 再上采样到目标采样率（这是模型的输入条件）
                 if upsampling_method == 'scipy':
                     cond = scipy.signal.resample_poly(audio_lr, target_sr, simulate_low_sr)
-                elif upsampling_method == 'librosa':
+            elif upsampling_method == 'librosa':
                     cond = librosa.resample(audio_lr, orig_sr=simulate_low_sr, target_sr=target_sr, res_type='soxr_hq')
                 else:
                     raise ValueError(f"不支持的上采样方法: {upsampling_method}")
@@ -296,7 +296,7 @@ def main():
         vocoder_config=inf_cfg['vocoder_config_path'], 
         vocoder_path=inf_cfg['vocoder_path']
     )        
-    
+        
     # 加载模型checkpoint
     print(f"加载模型checkpoint: {inf_cfg['checkpoint']}")
     model_checkpoint = torch.load(inf_cfg['checkpoint'], map_location=device)
