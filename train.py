@@ -266,6 +266,9 @@ if __name__ == "__main__":
     num_epochs = getattr(hparams.train, 'num_epochs', 0) if hasattr(hparams, 'train') else 0
     num_epochs = int(num_epochs) if num_epochs else None
     num_train_steps = int(hparams.train.n_train_steps) if hasattr(hparams, 'train') and int(getattr(hparams.train, 'n_train_steps', 0) or 0) > 0 else None
+    # Align with FlowHigh: if n_train_steps is explicitly set, prefer step-based training
+    if num_train_steps is not None:
+        num_epochs = None
 
     trainer = FLowHighTrainer(cfm_wrapper= cfm_wrapper,
                               batch_size= hparams.train.batchsize,

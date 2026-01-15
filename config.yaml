@@ -2,8 +2,7 @@
 # - `train.py` 会把该 YAML 归一化成 FlowHighTrainer 所需字段
 # - `inference.py` 仅读取 `inference:` 下的配置
 
-seed: 42
-num_epochs: 100
+seed: 104
 
 model:
   modelname: "FLowHigh-DiM"
@@ -38,7 +37,9 @@ data:
 
   # 采样率（训练时会随机从 source_sr_list 生成 LR 条件，再上采样到 target_sr）
   target_sr: 48000
-  source_sr_list: [8000, 16000, 24000, 32000]
+  # 对齐 FlowHigh：使用区间随机（step=1000），不使用离散列表
+  downsample_min: 4000
+  downsample_max: 32000
   downsampling_method: "scipy"  # scipy / librosa / torchaudio
 
   # Mel/STFT 参数（用于 MelVoco encode）
@@ -57,6 +58,15 @@ optimizer:
   lr: 3e-4         # Aligned with FlowHigh config.json (was 1e-4)
 
 training:
+  # 对齐 FlowHigh：显式按 step 训练（train.py 会优先使用 n_train_steps）
+  n_train_steps: 400001
+  n_warmup_steps: 0
+  initial_lr: 1e-5
+  log_every: 10000
+  save_results_every: 10000
+  save_model_every: 100000
+  random_split_seed: 53
+  weighted_loss: false
   ddp_find_unused_parameters: true
 
 output:
