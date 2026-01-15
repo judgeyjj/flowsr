@@ -37,6 +37,8 @@ data:
 
   # 采样率（训练时会随机从 source_sr_list 生成 LR 条件，再上采样到 target_sr）
   target_sr: 48000
+  # 对齐 FlowHigh config.json
+  max_wav_value: 32767.0
   # 对齐 FlowHigh：使用区间随机（step=1000），不使用离散列表
   downsample_min: 4000
   downsample_max: 32000
