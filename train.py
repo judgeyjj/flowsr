@@ -152,6 +152,7 @@ def _normalize_yaml_to_flowhigh_dict(cfg: dict) -> dict:
             'swanlab_project': str(output.get('swanlab_project', 'flowsr')),
             'swanlab_log_interval_steps': int(output.get('swanlab_log_interval_steps', 0) or 0),
             'ddp_find_unused_parameters': bool(training.get('ddp_find_unused_parameters', False)),
+            'gradient_accumulation_steps': int(training.get('gradient_accumulation_steps', 1)),
         }
     }
     return out
@@ -295,6 +296,7 @@ if __name__ == "__main__":
                               swanlab_project=getattr(hparams.train, 'swanlab_project', 'flowsr'),
                               swanlab_log_interval_steps=getattr(hparams.train, 'swanlab_log_interval_steps', 0),
                               ddp_find_unused_parameters=getattr(hparams.train, 'ddp_find_unused_parameters', False),
+                              grad_accum_every=getattr(hparams.train, 'gradient_accumulation_steps', 1),
                               dataloader_num_workers=getattr(hparams.data, 'num_workers', 0),
                               dataloader_persistent_workers=False,
                               )

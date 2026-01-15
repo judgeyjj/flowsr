@@ -2,6 +2,8 @@
 # - `train.py` 会把该 YAML 归一化成 FlowHighTrainer 所需字段
 # - `inference.py` 仅读取 `inference:` 下的配置
 
+device: 'cuda'
+gpu_ids: '0'
 seed: 104
 
 model:
@@ -69,6 +71,8 @@ training:
   save_model_every: 100000
   random_split_seed: 53
   weighted_loss: false
+  # 显存优化：梯度累积（如果 batch_size=128 爆显存，可减小 batch_size 并增大此值）
+  gradient_accumulation_steps: 1
   ddp_find_unused_parameters: true
 
 output:
