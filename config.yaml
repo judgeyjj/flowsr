@@ -28,6 +28,17 @@ model:
   hop_length: 512
   target_sr: 48000
   power_law_alpha: 0.2
+
+  # FlowHigh / Diffusion backbone
+  # 可选: mamba, mamba2, transformer, convnext
+  architecture: mamba2
+
+  # Mamba / Mamba2 推荐配置
+  # - Mamba2 建议 d_state=128 + headdim=64
+  mamba_d_state: 128
+  mamba_d_conv: 4
+  mamba_expand: 2
+  mamba2_headdim: 64
   
   # 网络参数
   cond_channels: 128
@@ -76,21 +87,6 @@ loss:
   stft_weight: 45.0       # STFT 损失权重（类似 ClearerVoice 的 Mel L1 ×45）
   waveform_l1_weight: 1.0 # 可选：时域 L1 额外约束（SR 模式更常用）
 
-# GAN 配置 (LSGAN + Feature Matching，对齐 ClearerVoice)
-gan:
-  enabled: true           # 是否启用 GAN
-  start_epoch: 1         # Warmup 结束后启动 GAN
-  lr_d: 1e-4              # 判别器学习率
-  weight: 1.0             # GAN 对抗损失权重
-  fm_weight: 1.0          # Feature Matching 损失权重
-  mbd_fft_sizes: [2048, 1024, 512]  # MBD FFT 窗口大小
-
-# 带宽检测与低频替换（对齐 ClearerVoice HiFiSR）
-bandwidth:
-  energy_threshold: 0.99   # 能量累计阈值，用于从 LR(up) 输入自动检测 cutoff_bin
-  butter_order: 4          # 推理端 bandwidth_sub 滤波器阶数
-  transition_ms: 100       # 推理端 bandwidth_sub 起始交叉淡入长度（毫秒）
-
 # 推理配置
 inference:
   # 路径配置
@@ -108,7 +104,7 @@ inference:
   
   # 推理方法配置
   up_sampling_method: 'scipy'     # 上采样方法: scipy, librosa, torchaudio
-  architecture: 'mamba'           # 架构: mamba, transformer, convnext
+  architecture: 'mamba2'          # 架构: mamba, mamba2, transformer, convnext
   time_step: 1                    # ODE求解步数
   cfm_method: 'independent_cfm_adaptive'  # CFM方法
   ode_method: 'euler'             # ODE求解方法: euler, midpoint

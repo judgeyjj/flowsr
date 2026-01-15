@@ -32,9 +32,9 @@ LOGGER = logging.getLogger(__file__)
 logging.basicConfig(filename='model_debug.log', level=logging.INFO)
 
 # ==========================================================
-# Mamba (DiM: Diffusion in Mamba)
-# - 仅使用官方 mamba_ssm.Mamba，不实现任何手写 SSM
-# - 非因果生成：采用双向 Mamba（forward + reverse）
+# Mamba / Mamba2 (DiM: Diffusion in Mamba)
+# - 仅使用官方 mamba-ssm 提供的算子（Mamba / Mamba2），不实现任何手写 SSM
+# - 非因果生成：采用双向（forward + reverse）
 # ==========================================================
 
 try:
@@ -43,6 +43,23 @@ try:
 except Exception:
     OfficialMamba = None
     MAMBA_AVAILABLE = False
+
+try:
+    # Mamba2 is available in newer mamba-ssm versions
+    from mamba_ssm import Mamba2 as OfficialMamba2
+    MAMBA2_AVAILABLE = True
+except Exception:
+    # fallback import paths across versions
+    try:
+        from mamba_ssm.modules.mamba2 import Mamba2 as OfficialMamba2  # type: ignore
+        MAMBA2_AVAILABLE = True
+    except Exception:
+        try:
+            from mamba_ssm.modules.mamba2_simple import Mamba2 as OfficialMamba2  # type: ignore
+            MAMBA2_AVAILABLE = True
+        except Exception:
+            OfficialMamba2 = None
+            MAMBA2_AVAILABLE = False
 
 # helper functions
 
@@ -585,6 +602,143 @@ class MambaStack(Module):
             for _ in range(int(depth))
         ])
         self.final_norm = nn.LayerNorm(int(dim), eps=1e-6)
+
+    def forward(self, x: torch.Tensor, *, cond: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        for layer in self.layers:
+            x = layer(x, cond=cond, mask=mask)
+        return self.final_norm(x)
+
+
+class BiDirectionalMamba2Block(Module):
+    """
+    双向 Mamba2 Block（用于非因果生成任务）
+
+    目标：
+    - 严格依赖官方 mamba-ssm 的 Mamba2，不做任何手写 SSM
+    - 采用 RMSNorm 风格（这里使用 AdaptiveRMSNorm 做条件归一化）
+    """
+
+    def __init__(
+        self,
+        *,
+        dim: int,
+        hidden_dim: int,
+        d_state: int = 128,
+        d_conv: int = 4,
+        expand: int = 2,
+        headdim: int = 64,
+        ff_mult: int = 4,
+        ff_dropout: float = 0.0,
+    ):
+        super().__init__()
+        if not MAMBA2_AVAILABLE:
+            raise ImportError("mamba_ssm with Mamba2 is required for architecture='mamba2'. Please install a recent mamba-ssm.")
+
+        self.dim = int(dim)
+        self.hidden_dim = int(hidden_dim)
+        self.headdim = int(headdim)
+
+        if self.headdim <= 0:
+            raise ValueError(f"headdim must be positive, got {self.headdim}")
+        if (self.dim % self.headdim) != 0:
+            raise ValueError(f"dim must be divisible by headdim for Mamba2 (dim={self.dim}, headdim={self.headdim})")
+
+        # conditional pre-norms (RMSNorm-style)
+        self.norm1 = AdaptiveRMSNorm(self.dim, cond_dim=self.hidden_dim)
+        self.norm2 = AdaptiveRMSNorm(self.dim, cond_dim=self.hidden_dim)
+
+        # Instantiate Mamba2 with best-effort kwarg filtering for cross-version compatibility
+        import inspect
+
+        def _filter_kwargs(fn, kwargs: dict) -> dict:
+            try:
+                sig = inspect.signature(fn)
+            except (TypeError, ValueError):
+                return kwargs
+            params = sig.parameters
+            # if fn accepts **kwargs, do not filter
+            if any(p.kind == p.VAR_KEYWORD for p in params.values()):
+                return kwargs
+            return {k: v for k, v in kwargs.items() if k in params}
+
+        base_kwargs = dict(
+            d_model=self.dim,
+            d_state=int(d_state),
+            d_conv=int(d_conv),
+            expand=int(expand),
+            headdim=self.headdim,
+            d_head=self.headdim,  # some versions may use d_head instead of headdim
+        )
+
+        mamba2_init = getattr(OfficialMamba2, "__init__", OfficialMamba2)
+        m2_kwargs = _filter_kwargs(mamba2_init, base_kwargs)
+        self.mamba2_fwd = OfficialMamba2(**m2_kwargs)
+        self.mamba2_bwd = OfficialMamba2(**m2_kwargs)
+
+        self.ff = FeedForward(self.dim, mult=ff_mult, dropout=ff_dropout)
+
+    def forward(self, x: torch.Tensor, *, cond: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Args:
+            x: (B, N, D)
+            cond: (B, hidden_dim) time embedding
+            mask: (B, N) optional, True for valid tokens
+        """
+        if mask is not None:
+            x = x.masked_fill(~mask[..., None], 0.)
+
+        residual = x
+        x1 = self.norm1(x, cond=cond)
+        y_fwd = self.mamba2_fwd(x1)
+
+        x1_rev = torch.flip(x1, dims=[1])
+        y_bwd = self.mamba2_bwd(x1_rev)
+        y_bwd = torch.flip(y_bwd, dims=[1])
+
+        x = residual + 0.5 * (y_fwd + y_bwd)
+
+        # FFN
+        x = x + self.ff(self.norm2(x, cond=cond))
+
+        if mask is not None:
+            x = x.masked_fill(~mask[..., None], 0.)
+
+        return x
+
+
+class Mamba2Stack(Module):
+    """
+    多层双向 Mamba2 堆叠，接口对齐 Transformer / MambaStack，便于替换。
+    """
+
+    def __init__(
+        self,
+        *,
+        dim: int,
+        depth: int,
+        hidden_dim: int,
+        d_state: int = 128,
+        d_conv: int = 4,
+        expand: int = 2,
+        headdim: int = 64,
+        ff_mult: int = 4,
+        ff_dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            BiDirectionalMamba2Block(
+                dim=int(dim),
+                hidden_dim=int(hidden_dim),
+                d_state=int(d_state),
+                d_conv=int(d_conv),
+                expand=int(expand),
+                headdim=int(headdim),
+                ff_mult=int(ff_mult),
+                ff_dropout=float(ff_dropout),
+            )
+            for _ in range(int(depth))
+        ])
+        self.final_norm = RMSNorm(int(dim))
 
     def forward(self, x: torch.Tensor, *, cond: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         for layer in self.layers:

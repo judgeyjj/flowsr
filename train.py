@@ -53,12 +53,34 @@ def _normalize_yaml_to_flowhigh_dict(cfg: dict) -> dict:
     output = cfg.get('output', {}) or {}
     optimizer = cfg.get('optimizer', {}) or {}
 
+    # Model / architecture knobs (FlowHigh + Mamba/Mamba2)
+    architecture = str(model.get('architecture', 'mamba'))
+    mamba_d_state = int(model.get('mamba_d_state', 16))
+    mamba_d_conv = int(model.get('mamba_d_conv', 4))
+    mamba_expand = int(model.get('mamba_expand', 2))
+    mamba2_headdim = int(model.get('mamba2_headdim', 64))
+
+    # Recommended defaults for Mamba2 (do not change Mamba1 defaults)
+    if architecture == 'mamba2' and mamba_d_state == 16:
+        mamba_d_state = 128
+
     # sr/config.yaml uses output.exp_dir + output.exp_name; FlowHigh expects train.save_dir
     exp_dir = output.get('exp_dir', None)
     exp_name = output.get('exp_name', None)
     save_dir = output.get('save_dir', None)
     if (not save_dir) and exp_dir and exp_name:
         save_dir = os.path.join(str(exp_dir), str(exp_name))
+
+    # Prevent checkpoint overwrite between different architectures/configs
+    if architecture == 'mamba2':
+        suffix = f"_mamba2_d{int(mamba_d_state)}_h{int(mamba2_headdim)}"
+        if save_dir:
+            save_dir_str = str(save_dir)
+            # avoid duplicating suffix if user already added it
+            if ("mamba2" not in os.path.basename(save_dir_str).lower()) and (not save_dir_str.endswith(suffix)):
+                save_dir = save_dir_str + suffix
+        elif exp_dir and exp_name:
+            save_dir = os.path.join(str(exp_dir), str(exp_name) + suffix)
 
     # sr/config.yaml uses data.target_sr + data.source_sr_list
     target_sr = int(data.get('target_sr', model.get('target_sr', 48000)))
@@ -92,7 +114,7 @@ def _normalize_yaml_to_flowhigh_dict(cfg: dict) -> dict:
         'model': {
             # sr/config.yaml model.* 与 FlowHigh 不同；这里全部给默认值（你只维护 sr 的 config.yaml）
             'modelname': str(model.get('modelname', 'FLowHigh-DiM')),
-            'architecture': str(model.get('architecture', 'mamba')),
+            'architecture': architecture,
             'dim': int(model.get('dim', 1024)),
             'n_layers': int(model.get('n_layers', 2)),
             'n_heads': int(model.get('n_heads', 16)),
@@ -104,9 +126,11 @@ def _normalize_yaml_to_flowhigh_dict(cfg: dict) -> dict:
             'vocoderpath': str(model.get('vocoderpath', 'vocoder/BIGVGAN/checkpoint/g_48_00850000')),
             'vocoderconfigpath': str(model.get('vocoderconfigpath', 'vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json')),
             # DiM(Mamba) optional hyperparams
-            'mamba_d_state': int(model.get('mamba_d_state', 16)),
-            'mamba_d_conv': int(model.get('mamba_d_conv', 4)),
-            'mamba_expand': int(model.get('mamba_expand', 2)),
+            'mamba_d_state': int(mamba_d_state),
+            'mamba_d_conv': int(mamba_d_conv),
+            'mamba_expand': int(mamba_expand),
+            # Mamba2 optional hyperparams
+            'mamba2_headdim': int(mamba2_headdim),
         },
         'train': {
             'random_split_seed': int(training.get('random_split_seed', 53)),
@@ -198,6 +222,16 @@ if __name__ == "__main__":
     # audio_enc_dec_type = SpecVoco()
         
     r0_print('Initializing FLowHigh...')
+    if hasattr(hparams, 'model') and getattr(hparams.model, 'architecture', None) == 'mamba2':
+        r0_print(f"[mamba2] Using recommended config: d_state={getattr(hparams.model, 'mamba_d_state', None)}, headdim={getattr(hparams.model, 'mamba2_headdim', None)}")
+        try:
+            import modules as _modules
+            r0_print(f"[mamba2] Import status: MAMBA2_AVAILABLE={getattr(_modules, 'MAMBA2_AVAILABLE', False)}")
+        except Exception as e:
+            r0_print(f"[mamba2] Import status: failed to check MAMBA2_AVAILABLE ({e})")
+    if hasattr(hparams, 'train') and hasattr(hparams.train, 'save_dir'):
+        r0_print(f"Checkpoint/results folder: {hparams.train.save_dir}")
+
     model = FLowHigh(
                     architecture=hparams.model.architecture,
                     dim_in= hparams.data.n_mel_channels, # Same with Mel-bins 
@@ -209,6 +243,7 @@ if __name__ == "__main__":
                     mamba_d_state=getattr(hparams.model, 'mamba_d_state', 16),
                     mamba_d_conv=getattr(hparams.model, 'mamba_d_conv', 4),
                     mamba_expand=getattr(hparams.model, 'mamba_expand', 2),
+                    mamba2_headdim=getattr(hparams.model, 'mamba2_headdim', 64),
                     )
     
     r0_print('Initializing CFM Wrapper...')

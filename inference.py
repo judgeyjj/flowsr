@@ -17,6 +17,7 @@ from torchinfo import summary
 from metrics import compute_all_metrics
 import yaml
 import time
+from modules import MAMBA2_AVAILABLE
 
 
 def load_config(config_path):
@@ -284,6 +285,8 @@ def main():
     pp = PostProcessing(0)
 
     print(f'初始化FLowHigh模型...')
+    if inf_cfg.get('architecture', '').lower() == 'mamba2':
+        print(f"[mamba2] Import status: MAMBA2_AVAILABLE={MAMBA2_AVAILABLE}")
     
     # 初始化Mel Vocoder
     audio_enc_dec_type = MelVoco(

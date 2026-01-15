@@ -20,7 +20,7 @@ from librosa.filters import mel as librosa_mel_fn
 from utils import sequence_mask
 import numpy
 import matplotlib.pyplot as plt
-from modules import LearnedSinusoidalPosEmb, ConvPositionEmbed, Transformer, ConvNeXtBlock, MambaStack
+from modules import LearnedSinusoidalPosEmb, ConvPositionEmbed, Transformer, ConvNeXtBlock, MambaStack, Mamba2Stack
 from postprocessing import PostProcessing
 from init_vocoder import init_bigvgan
 
@@ -305,6 +305,8 @@ class FLowHigh(Module):
         mamba_d_state: int = 16,
         mamba_d_conv: int = 4,
         mamba_expand: int = 2,
+        # Mamba2 head dimension (recommended 64; requires dim % headdim == 0)
+        mamba2_headdim: int = 64,
     ):
         super().__init__()
         dim_in = default(dim_in, dim)
@@ -317,8 +319,20 @@ class FLowHigh(Module):
             time_hidden_dim = default(time_hidden_dim, dim)
         elif self.architecture=='mamba':
             time_hidden_dim = default(time_hidden_dim, dim)
+        elif self.architecture=='mamba2':
+            time_hidden_dim = default(time_hidden_dim, dim)
         else:
             raise ValueError("Choose approriate architecture")
+
+        # Recommended defaults for Mamba2 (keep user override if they set non-default values)
+        if self.architecture == 'mamba2':
+            if int(mamba_d_state) == 16:
+                mamba_d_state = 128
+            mamba2_headdim = int(mamba2_headdim)
+            if mamba2_headdim <= 0:
+                raise ValueError(f"mamba2_headdim must be positive, got {mamba2_headdim}")
+            if int(dim) % mamba2_headdim != 0:
+                raise ValueError(f"For Mamba2, dim must be divisible by headdim (dim={int(dim)}, headdim={mamba2_headdim})")
         
         self.audio_enc_dec = audio_enc_dec 
 
@@ -382,6 +396,20 @@ class FLowHigh(Module):
                 d_state=int(mamba_d_state),
                 d_conv=int(mamba_d_conv),
                 expand=int(mamba_expand),
+                ff_mult=int(ff_mult),
+                ff_dropout=float(ff_dropout),
+            )
+
+        elif self.architecture == 'mamba2':
+            # Mamba2Stack is bidirectional + AdaptiveRMSNorm(cond=time_emb) per block
+            self.mamba2 = Mamba2Stack(
+                dim=dim,
+                depth=depth,
+                hidden_dim=time_hidden_dim,
+                d_state=int(mamba_d_state),
+                d_conv=int(mamba_d_conv),
+                expand=int(mamba_expand),
+                headdim=int(mamba2_headdim),
                 ff_mult=int(ff_mult),
                 ff_dropout=float(ff_dropout),
             )
@@ -503,6 +531,10 @@ class FLowHigh(Module):
         elif self.architecture == 'mamba':
             # mask is optional; pass to MambaStack so padded tokens are zeroed
             x = self.mamba(x, cond=time_emb, mask=self_attn_mask)
+
+        elif self.architecture == 'mamba2':
+            # mask is optional; pass to Mamba2Stack so padded tokens are zeroed
+            x = self.mamba2(x, cond=time_emb, mask=self_attn_mask)
 
         # Protect NaN
         logging.info(f"After transformer: {x}")
