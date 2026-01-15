@@ -226,15 +226,14 @@ if __name__ == "__main__":
     # audio_enc_dec_type = SpecVoco()
         
     r0_print('Initializing FLowHigh...')
-    if hasattr(hparams, 'model') and getattr(hparams.model, 'architecture', None) == 'mamba2':
-        r0_print(f"[mamba2] Using recommended config: d_state={getattr(hparams.model, 'mamba_d_state', None)}, headdim={getattr(hparams.model, 'mamba2_headdim', None)}")
+    
+    # Print Mamba2 import status if using mamba2 architecture
+    if getattr(hparams.model, 'architecture', None) == 'mamba2':
         try:
             import modules as _modules
             r0_print(f"[mamba2] Import status: MAMBA2_AVAILABLE={getattr(_modules, 'MAMBA2_AVAILABLE', False)}")
         except Exception as e:
-            r0_print(f"[mamba2] Import status: failed to check MAMBA2_AVAILABLE ({e})")
-    if hasattr(hparams, 'train') and hasattr(hparams.train, 'save_dir'):
-        r0_print(f"Checkpoint/results folder: {hparams.train.save_dir}")
+            r0_print(f"[mamba2] Import status check failed: {e}")
 
     model = FLowHigh(
                     architecture=hparams.model.architecture,

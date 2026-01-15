@@ -285,7 +285,9 @@ def main():
     pp = PostProcessing(0)
 
     print(f'初始化FLowHigh模型...')
-    if inf_cfg.get('architecture', '').lower() == 'mamba2':
+    
+    # Print Mamba2 import status if using mamba2 architecture
+    if inf_cfg.get('architecture') == 'mamba2':
         print(f"[mamba2] Import status: MAMBA2_AVAILABLE={MAMBA2_AVAILABLE}")
     
     # 初始化Mel Vocoder

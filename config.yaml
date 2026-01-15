@@ -1,37 +1,28 @@
-# DMRF-SR 训练配置（UNet 纯监督 SR）
-#
-# - 在复数 STFT 空间做频谱修复：以低频带为条件，补全高频带
-# - UNet 一次前向，iSTFT 直接重建波形
-# - 主损失为 STFT 域重建（sc + mag）
+# FlowSR (FlowHigh) 训练 / 推理配置
+# - `train.py` 会把该 YAML 归一化成 FlowHighTrainer 所需字段
+# - `inference.py` 仅读取 `inference:` 下的配置
 
-# 通用配置（纯监督 SR：UNet 一次前向）
-device: 'cuda'
-gpu_ids: '0'  # 指定使用的 GPU 卡号，用逗号分隔，如 '0,1' 或 '4,5,6,7'
 seed: 42
 num_epochs: 100
-val_interval: 1
-save_interval: 5
-sample_interval: 1
-checkpoint_dir: './checkpoints'
 
-# 显存优化配置
-gradient_accumulation_steps: 4  # 梯度累积步数，有效 batch_size = batch_size * accumulation_steps
-use_amp: true                  # 使用混合精度训练
-amp_dtype: 'bfloat16'           # 混合精度类型: 'bfloat16'(稳定) 或 'float16'(更快但可能溢出)
-grad_clip: 10.0                  # 梯度裁剪阈值
-gradient_checkpointing: true    # 梯度检查点，节省显存但训练变慢约20%
-
-# 模型配置
 model:
-  # STFT 参数
-  n_fft: 2048
-  hop_length: 512
-  target_sr: 48000
-  power_law_alpha: 0.2
+  modelname: "FLowHigh-DiM"
+  architecture: "mamba2"  # mamba / mamba2 / transformer / convnext
 
-  # FlowHigh / Diffusion backbone
-  # 可选: mamba, mamba2, transformer, convnext
-  architecture: mamba2
+  # FlowHigh backbone
+  dim: 1024
+  n_layers: 2
+  n_heads: 16
+  dim_head: 64
+
+  # CFM / ODE
+  cfm_path: "independent_cfm_adaptive"
+  sigma: 1e-4
+
+  # Vocoder（训练端默认不在初始化时加载；仅在 decode 保存音频时才需要）
+  vocoder: "bigvgan"
+  vocoderpath: "vocoder/BIGVGAN/checkpoint/g_48_00850000"
+  vocoderconfigpath: "vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json"
 
   # Mamba / Mamba2 推荐配置
   # - Mamba2 建议 d_state=128 + headdim=64
@@ -39,111 +30,73 @@ model:
   mamba_d_conv: 4
   mamba_expand: 2
   mamba2_headdim: 64
-  
-  # 网络参数
-  cond_channels: 128
-  cond_dim: 256
-  base_channels: 64
-  channel_mults: [1, 2, 4, 8]
-  num_bottleneck_blocks: 4
-  dropout: 0.1
 
-# 数据配置
 data:
-  # 训练数据路径
   train_dir: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/clean"
-  # 验证数据路径
   val_dir: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/train/eval"
-  
+  valid_prepare: true
+
+  # 采样率（训练时会随机从 source_sr_list 生成 LR 条件，再上采样到 target_sr）
   target_sr: 48000
-  source_sr_list: [8000, 32000, 16000, 24000]
-  val_sr_list: [16000]
-  
-  segment_seconds: 0.51
+  source_sr_list: [8000, 16000, 24000, 32000]
+  downsampling_method: "scipy"  # scipy / librosa / torchaudio
+
+  # Mel/STFT 参数（用于 MelVoco encode）
+  n_mel_channels: 256
+  mel_fmin: 20
+  mel_fmax: 24000
+  n_fft: 2048
+  win_length: 2048
+  hop_length: 480
+
   batch_size: 2
   num_workers: 4
-  normalize_audio: true
-  normalize_peak: 0.95
 
-# 优化器配置
 optimizer:
   lr: 1e-4
-  beta1: 0.8              # ClearerVoice 设置
-  beta2: 0.99             # ClearerVoice 设置
-  weight_decay: 1e-5      # 降低正则化强度
 
-# 学习率调度器 (Warmup + ReduceOnPlateau)
-scheduler:
-  type: 'reduce_on_plateau' # 对齐 ClearerVoice 的衰减策略
-  warmup_epochs: 0        # 早期 Warmup
-  factor: 0.5             # 衰减因子 (halving)
-  patience: 5             # 5个epoch无改善衰减
-  min_lr: 1e-6
-
-# 损失配置
-loss:
-  sr_spec_weight: 0.5     # SR 模式：可选高频复数谱 L1（辅助项，默认关闭；主损失建议用 STFT）
-  use_stft_loss: true     # 启用 STFT 重建损失（主损失）
-  stft_weight: 45.0       # STFT 损失权重（类似 ClearerVoice 的 Mel L1 ×45）
-  waveform_l1_weight: 1.0 # 可选：时域 L1 额外约束（SR 模式更常用）
-
-# 推理配置
-inference:
-  # 路径配置
-  checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt'
-  input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
-  output_path: './output_207'
-  gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
-  
-  # 设备配置
-  device: 'cuda'
-  
-  # 采样率配置
-  target_sampling_rate: 48000     # 目标采样率
-  simulate_low_sr: 16000          # 模拟低分辨率采样率（会先将高分辨率下采样到此采样率）
-  
-  # 推理方法配置
-  up_sampling_method: 'scipy'     # 上采样方法: scipy, librosa, torchaudio
-  architecture: 'mamba2'          # 架构: mamba, mamba2, transformer, convnext
-  time_step: 1                    # ODE求解步数
-  cfm_method: 'independent_cfm_adaptive'  # CFM方法
-  ode_method: 'euler'             # ODE求解方法: euler, midpoint
-  sigma: 1e-4                     # 标准差
-  
-  # 模型参数
-  n_layers: 2                     # 层数
-  n_heads: 16                     # 注意力头数
-  dim_head: 64                    # 每个头的维度
-  dim: 1024                       # 模型维度
-  
-  # 音频处理参数
-  n_mels: 256                     # Mel频带数
-  f_max: 24000                    # 最大频率
-  n_fft: 2048                     # FFT大小
-  win_length: 2048                # 窗口长度
-  hop_length: 480                 # 跳跃长度
-  
-  # Vocoder配置
-  vocoder: 'bigvgan'              # Vocoder类型
-  vocoder_path: '/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/checkpoint/g_48_00850000'
-  vocoder_config_path: '/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json'
-  
-  # 其他配置
-  chunk_seconds: null             # 长音频分块处理长度（秒）
-  compute_metrics: true           # 是否计算客观指标
-
-# 早停配置（可选，ClearerVoice 默认不启用）
 training:
-  patience: 10             # 早停耐心值（验证 loss 不改善的 epoch 数）
-  min_delta: 0.0           # 最小改善阈值
-  ddp_find_unused_parameters: true  # DDP 性能优化：若 forward 不存在 unused params，建议关闭
+  ddp_find_unused_parameters: true
 
-# 输出配置
 output:
-  exp_dir: './experiments'
-  exp_name: 'dmrf_sr_spectrum_unet'
+  exp_dir: "./experiments"
+  exp_name: "dmrf_sr_spectrum_unet"  # mamba2 会自动追加后缀，避免覆盖旧 ckpt
   use_swanlab: true
-  swanlab_project: 'dmrf-sr'
-  swanlab_log_interval_steps: 1  # 每 N 次优化器更新(global_step)记录一次训练曲线；设为 0 则只按 epoch 记录
+  swanlab_project: "dmrf-sr"
+  swanlab_log_interval_steps: 1
 
+inference:
+  checkpoint: "/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt"
+  input_path: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean"
+  output_path: "./output_207"
+  gt_path: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean"
 
+  device: "cuda"
+
+  target_sampling_rate: 48000
+  simulate_low_sr: 16000
+  up_sampling_method: "scipy"
+
+  architecture: "mamba2"  # mamba / mamba2 / transformer / convnext
+  time_step: 1
+  cfm_method: "independent_cfm_adaptive"
+  ode_method: "euler"
+  sigma: 1e-4
+
+  n_layers: 2
+  n_heads: 16
+  dim_head: 64
+  dim: 1024
+
+  n_mels: 256
+  f_max: 24000
+  n_fft: 2048
+  win_length: 2048
+  hop_length: 480
+
+  vocoder: "bigvgan"
+  vocoder_path: "/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/checkpoint/g_48_00850000"
+  vocoder_config_path: "/data01/audio_group/m24_yuanjiajun/flowsr/vocoder/BIGVGAN/config/bigvgan_48khz_256band_config.json"
+
+  chunk_seconds: null
+  compute_metrics: true
