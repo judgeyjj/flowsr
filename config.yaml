@@ -96,7 +96,7 @@ inference:
   # 路径配置
   checkpoint: '/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt'
   input_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
-  output_path: './output'
+  output_path: './output_207'
   gt_path: '/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean'
   
   # 设备配置
@@ -109,7 +109,7 @@ inference:
   # 推理方法配置
   up_sampling_method: 'scipy'     # 上采样方法: scipy, librosa, torchaudio
   architecture: 'mamba'           # 架构: mamba, transformer, convnext
-  time_step: 4                    # ODE求解步数
+  time_step: 1                    # ODE求解步数
   cfm_method: 'independent_cfm_adaptive'  # CFM方法
   ode_method: 'euler'             # ODE求解方法: euler, midpoint
   sigma: 1e-4                     # 标准差

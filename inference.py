@@ -96,7 +96,8 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             if simulate_low_sr is not None and simulate_low_sr > 0:
                 # 下采样到低采样率（模拟低分辨率输入）
                 if sr_original != simulate_low_sr:
-                    audio_lr = librosa.resample(audio_hr, orig_sr=sr_original, target_sr=simulate_low_sr)
+                    # 使用scipy.resample_poly进行下采样（与FLowHigh论文一致）
+                    audio_lr = scipy.signal.resample_poly(audio_hr, simulate_low_sr, sr_original)
                 else:
                     audio_lr = audio_hr.copy()
                 
@@ -114,8 +115,8 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
                 else:
                     cond = audio_hr.copy()
             
-            # 归一化
-            cond /= np.max(np.abs(cond)) + 1e-8
+            # 归一化（与FLowHigh一致，不加epsilon）
+            cond /= np.max(np.abs(cond))
             
             # 转换为tensor（确保 float32 / contiguous / 正确 device）
             if isinstance(cond, np.ndarray):

@@ -21,8 +21,26 @@ class PostProcessing:
     
     def post_processing(self, pred, src, length):
         # pred, src : [1, Time]
-        # 关闭低频替换，直接返回模型预测
-        audio = pred[:, :length]
+        assert len(pred.shape) == 2 and len(src.shape) == 2 
+        
+        spec_pred = self.stft(pred) # [1, Channel, Time]
+        spec_src  = self.stft(src) # [1, Channel, Time]
+
+        # energy cutoff of spec_src
+        cr = self.get_cutoff_index(spec_src)
+
+        # Replacement
+        spec_result = torch.empty_like(spec_pred)
+        min_time_dim = min(spec_pred.size(-1), spec_src.size(-1))
+        
+        spec_result = spec_result[:, :, :min_time_dim]
+        spec_pred = spec_pred[:, :, :min_time_dim]
+        spec_src = spec_src[:, :, :min_time_dim]
+        
+        spec_result[:,cr:, ...] = spec_pred[:, cr:, ...]
+        spec_result[:, :cr, ...] = spec_src[:, :cr, ...]
+        
+        audio = self.istft(spec_result, length=length) 
         audio = audio / torch.abs(audio).max() * 0.99
         return audio
         

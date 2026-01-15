@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData">
+  <component name="PublishConfigData" serverName="m24_yuanjiajun@172.16.27.207:22 password (38)" confirmBeforeUploading="false">
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
       <paths name="m24_yuanjiajun205@172.16.27.205:22 password">
         <serverdata>
@@ -220,6 +221,34 @@
         </serverdata>
       </paths>
       <paths name="m24_yuanjiajun@172.16.27.207:22 password (35)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="m24_yuanjiajun@172.16.27.207:22 password (36)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="m24_yuanjiajun@172.16.27.207:22 password (37)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="m24_yuanjiajun@172.16.27.207:22 password (38)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/data01/audio_group/m24_yuanjiajun/flowsr" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="m24_yuanjiajun@172.16.27.207:22 password (39)">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
