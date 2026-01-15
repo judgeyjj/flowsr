@@ -332,13 +332,9 @@ def main():
     cfm_wrapper = cfm_wrapper.to(device).eval()
 
     # 计算参数量
-    number = sum(p.numel() for p in cfm_wrapper.parameters() if p.requires_grad)
-    if number >= 1_000_000:
-        print(f"模型参数量: {number / 1_000_000:.2f}M") 
-    elif number >= 1_000:
-        print(f"模型参数量: {number / 1_000:.2f}K") 
-    else:
-        print(f"模型参数量: {number}")
+    total_bytes = sum(p.numel() * p.element_size() for p in cfm_wrapper.parameters())
+    trainable_bytes = sum(p.numel() * p.element_size() for p in cfm_wrapper.parameters() if p.requires_grad)
+    print(f"模型参数占用: {trainable_bytes / (1024 ** 2):.2f} MB (trainable), {total_bytes / (1024 ** 2):.2f} MB (total)")
 
     summary(cfm_wrapper)
 

@@ -169,6 +169,10 @@ def load_config(config_path: str):
 
 
 if __name__ == "__main__":
+    # Avoid CPU oversubscription / deadlocks when DataLoader workers use scipy/librosa
+    # (torchrun already sets OMP_NUM_THREADS=1 by default; also cap BLAS-related threads)
+    for _k in ("MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(_k, "1")
     
     assert torch.cuda.is_available(), "CPU training is not allowed."
     n_gpus = torch.cuda.device_count()
@@ -253,6 +257,10 @@ if __name__ == "__main__":
     
     if _is_rank0():
         summary(cfm_wrapper)
+        # Unified parameter reporting in MB
+        total_bytes = sum(p.numel() * p.element_size() for p in cfm_wrapper.parameters())
+        trainable_bytes = sum(p.numel() * p.element_size() for p in cfm_wrapper.parameters() if p.requires_grad)
+        r0_print(f"Params size (trainable/total): {trainable_bytes / (1024 ** 2):.2f} MB / {total_bytes / (1024 ** 2):.2f} MB")
 
     r0_print('Initializing FLowHigh Trainer...')
     # Prefer epoch-based training if provided by sr/config.yaml; otherwise fall back to step-based

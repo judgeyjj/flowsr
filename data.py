@@ -11,6 +11,7 @@ import scipy
 from scipy.signal import butter, cheby1, cheby2, ellip, bessel, sosfiltfilt, resample_poly
 import numpy as np
 import random
+import os
 
 # utilities
 
@@ -185,11 +186,17 @@ def get_dataloader(
     collate_fn = pad_to_longest_fn if pad_to_longest else curtail_to_shortest_collate
     num_workers = int(num_workers or 0)
     persistent_workers = bool(persistent_workers) and num_workers > 0
+    # IMPORTANT:
+    # On Linux, DataLoader defaults to "fork". With heavy scientific stack (scipy/librosa/numba/omp),
+    # fork can deadlock at the first batch in multi-worker + DDP settings.
+    # Use "spawn" to avoid fork-related deadlocks.
+    multiprocessing_context = "spawn" if (os.name == "posix" and num_workers > 0) else None
     return DataLoader(
         ds,
         collate_fn=collate_fn,
         num_workers=num_workers,
         persistent_workers=persistent_workers,
         pin_memory=bool(pin_memory),
+        multiprocessing_context=multiprocessing_context,
         **kwargs
     )

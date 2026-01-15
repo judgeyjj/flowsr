@@ -33,6 +33,7 @@ import librosa
 import math
 import os
 import matplotlib.pyplot as plt
+import time
 
 # SwanLab (optional)
 try:
@@ -361,8 +362,17 @@ class FLowHighTrainer(nn.Module):
             is_last = grad_accum_step == (self.grad_accum_every - 1)
             context = partial(self.accelerator.no_sync, self.cfm_wrapper) if not is_last else nullcontext
 
-            # Downsampled audio 
-            HR_wave, wav_length, up_cond, random_sr = next(self.dataloader_iter)    
+            # Downsampled audio (first-batch heartbeat helps debug dataloader stalls)
+            if self.is_main and steps < 3:
+                self.print(f"[step {steps}] fetching batch... (num_workers={self.dataloader_num_workers})")
+                t0 = time.time()
+            HR_wave, wav_length, up_cond, random_sr = next(self.dataloader_iter)
+            if self.is_main and steps < 3:
+                dt = time.time() - t0
+                self.print(
+                    f"[step {steps}] fetched batch in {dt:.2f}s | "
+                    f"HR_wave={tuple(HR_wave.shape)} up_cond={tuple(up_cond.shape)}"
+                )
             cfm_unwrapped = self._unwrap_cfm()
             win_length = cfm_unwrapped.flowhigh.audio_enc_dec.win_length
             hop_length = cfm_unwrapped.flowhigh.audio_enc_dec.hop_length
@@ -445,13 +455,20 @@ class FLowHighTrainer(nn.Module):
         if mid_ckpt is not None:
             if os.path.exists(mid_ckpt):
                 self.load(mid_ckpt)  
-                print(f"Resuming training from checkpoint {mid_ckpt}")
+                if self.is_main:
+                    self.print(f"Resuming training from checkpoint {mid_ckpt}")
             else:
-                print(f"No checkpoint found at {mid_ckpt}, starting training from scratch")        
+                if self.is_main:
+                    self.print(f"No checkpoint found at {mid_ckpt}, starting training from scratch")
         else:
-            print(f"starting training from scratch...")   
+            if self.is_main:
+                self.print(f"starting training from scratch...")   
         
-        for _ in tqdm(range(int(self.steps.item()), self.num_train_steps), desc=f"Training Progress {self.model_name}"):
+        for _ in tqdm(
+            range(int(self.steps.item()), self.num_train_steps),
+            desc=f"Training Progress {self.model_name}",
+            disable=not self.is_main,
+        ):
         # while self.steps < self.num_train_steps:
             logs = self.train_step()
             log_fn(logs)
