@@ -3,7 +3,7 @@
 # - `inference.py` 仅读取 `inference:` 下的配置
 
 device: 'cuda'
-gpu_ids: '0'
+gpu_ids: '1'
 seed: 104
 
 model:
@@ -55,7 +55,7 @@ data:
   hop_length: 480
 
   # Training data
-  batch_size: 128  # Aligned with FlowHigh config.json (was 2)
+  batch_size: 32  # Aligned with FlowHigh config.json (was 2)
   num_workers: 4
 
 optimizer:
@@ -83,13 +83,13 @@ output:
   swanlab_log_interval_steps: 1
 
 inference:
-  checkpoint: "/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet/FLowHigh.300000.pt"
+  checkpoint: "/data01/audio_group/m24_yuanjiajun/flowsr/experiments/dmrf_sr_spectrum_unet_mamba2_d128_h64/FLowHigh.300000.pt"
   input_path: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean"
-  output_path: "./output_207"
+  output_path: "./output_207_new"
   gt_path: "/data01/audio_group/m24_yuanjiajun/AP-BWE/VCTK-Corpus-0.92/wav_test/test/clean"
 
   device: "cuda"
-
+  gpu_ids: '1'
   target_sampling_rate: 48000
   simulate_low_sr: 16000
   up_sampling_method: "scipy"
@@ -97,7 +97,7 @@ inference:
   architecture: "mamba2"  # mamba / mamba2 / transformer / convnext
   time_step: 1
   cfm_method: "independent_cfm_adaptive"
-  ode_method: "euler"
+  ode_method: "midpoint"
   sigma: 1e-4
 
   n_layers: 2

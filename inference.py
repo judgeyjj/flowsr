@@ -18,6 +18,10 @@ from metrics import compute_all_metrics
 import yaml
 import time
 from modules import MAMBA2_AVAILABLE
+from visqol import visqol_lib_py
+from visqol.pb2 import visqol_config_pb2
+from visqol.pb2 import similarity_result_pb2
+import visqol
 
 
 def load_config(config_path):
@@ -70,11 +74,47 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
     print("="*70)
     
     # 用于累积指标
-    all_metrics = {'LSD': [], 'SI-SNR': [], 'PESQ': [], 'STOI': []}
+    all_metrics = {'LSD': [], 'SI-SNR': [], 'PESQ': [], 'STOI': [], 'MOS-LQO': []}
     # 用于累积RTF
     all_rtf = []
     all_audio_durations = []
     all_inference_times = []
+    
+    # 用于记录最低LSD
+    min_lsd = float('inf')
+    min_lsd = float('inf')
+    min_lsd_file = "None"
+    
+    # 用于记录最高Visqol
+    max_visqol = float('-inf')
+    max_visqol_file = "None"
+
+    # 初始化 Visqol (Audio Mode 48kHz)
+    visqol_api = None
+    if gt_path and compute_metrics_flag:
+        try:
+            config_v = visqol_config_pb2.VisqolConfig()
+            config_v.audio.sample_rate = 48000
+            config_v.options.use_speech_scoring = False
+            
+            # 自动查找模型文件
+            visqol_path = os.path.dirname(visqol_lib_py.__file__)
+            model_path = os.path.join(visqol_path, "model", "libsvm_nu_svr_model.txt")
+            
+            if not os.path.exists(model_path):
+                print(f"警告: Visqol 模型文件未找到: {model_path}")
+                # 尝试备用路径 (有些安装可能在 site-packages/visqol/model)
+                model_path = os.path.join(visqol_path, "visqol_lib_py", "model", "libsvm_nu_svr_model.txt")
+            
+            if os.path.exists(model_path):
+                config_v.options.svr_model_path = model_path
+                visqol_api = visqol_lib_py.VisqolApi()
+                visqol_api.Create(config_v)
+                print(f"Visqol 初始化成功 (Audio Mode), 模型路径: {model_path}")
+            else:
+                print(f"错误: 无法找到 Visqol 模型文件，将跳过 MOS-LQO 计算。")
+        except Exception as e:
+            print(f"Visqol 初始化失败: {e}")
     
     with torch.no_grad():
         
@@ -83,9 +123,6 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
 
             audio_file_name = os.path.basename(wav_file).replace('.wav','')
             save_dir = os.path.join(output_dir, f'{audio_file_name}.wav')
-            
-            # 记录推理开始时间
-            start_time = time.time()
             
             # 加载高分辨率音频
             audio_hr, sr_original = librosa.load(wav_file, sr=None, mono=True)
@@ -125,6 +162,9 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             if cond.ndim == 1:
                 cond = cond.unsqueeze(0)
             cond = cond.contiguous()
+            
+            # 记录推理开始时间 (仅包含模型推理和后处理)
+            start_time = time.time()
             cond = cond.to(cfm_wrapper.device)
 
             # 使用CFM进行超分辨率重建（不要手工传 std_1/std_2，保持与训练/默认一致）
@@ -135,12 +175,12 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
             # 后处理
             HR_audio_pp = pp.post_processing(HR_audio, cond, cond.size(-1)) # [1, T] 
             
+            # 记录推理结束时间 (不包含IO)
+            end_time = time.time()
+            
             # 保存超分辨率音频
             HR_audio_pp_npy = (HR_audio_pp.cpu().squeeze().clamp(-1,1).numpy()*32767.0).astype(np.int16) 
             write(save_dir, target_sr, HR_audio_pp_npy)
-            
-            # 记录推理结束时间并计算RTF
-            end_time = time.time()
             inference_time = end_time - start_time
             rtf = inference_time / audio_duration
             
@@ -182,6 +222,21 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
                             win_length=win_length
                         )
                         
+                        # 计算 Visqol MOS-LQO
+                        if visqol_api is not None:
+                            try:
+                                # Visqol API (C++ binding) 需要传入 float 数组 (Span[float])
+                                # 这里的 gt_audio 是 float32, pred_audio 是 tensor
+                                # 我们统一转成 float64 的 numpy 数组传入
+                                gt_audio_np = gt_audio.astype(np.float64)
+                                pred_audio_np = pred_audio.cpu().numpy().astype(np.float64)
+                                
+                                similarity_result = visqol_api.Measure(gt_audio_np, pred_audio_np)
+                                mos_lqo = similarity_result.moslqo
+                                metrics['MOS-LQO'] = mos_lqo
+                            except Exception as e:
+                                print(f"    Visqol 计算失败: {e}")
+                        
                         # 累积指标
                         for key in all_metrics.keys():
                             if key in metrics and metrics[key] != 0.0:
@@ -191,6 +246,22 @@ def super_resolution(input_path, output_dir, config, cfm_wrapper, pp):
                         print(f"  客观指标:")
                         for key, value in metrics.items():
                             print(f"    {key}: {value:.4f}")
+                        
+                        # 更新并打印最低LSD
+                        if 'LSD' in metrics:
+                            current_lsd = metrics['LSD']
+                            if current_lsd < min_lsd:
+                                min_lsd = current_lsd
+                                min_lsd_file = audio_file_name
+                            print(f"    当前最低LSD: {min_lsd:.4f} (文件: {min_lsd_file})")
+                        
+                        # 更新并打印最高Visqol
+                        if 'MOS-LQO' in metrics:
+                            current_visqol = metrics['MOS-LQO']
+                            if current_visqol > max_visqol:
+                                max_visqol = current_visqol
+                                max_visqol_file = audio_file_name
+                            print(f"    当前最高Visqol: {max_visqol:.4f} (文件: {max_visqol_file})")
                             
                     except Exception as e:
                         print(f"警告: 无法计算 {audio_file_name} 的指标: {e}")
@@ -261,7 +332,11 @@ def main():
     if args.simulate_low_sr is not None:
         inf_cfg['simulate_low_sr'] = args.simulate_low_sr
     if args.device is not None:
-        inf_cfg['device'] = args.device
+        # 支持直接输入数字指定GPU
+        if args.device.isdigit():
+            inf_cfg['device'] = f"cuda:{args.device}"
+        else:
+            inf_cfg['device'] = args.device
     
     # 检查必需参数
     if inf_cfg.get('checkpoint') is None:
@@ -282,7 +357,7 @@ def main():
     print(f"使用设备: {device}")
     
     # 后处理
-    pp = PostProcessing(0)
+    pp = PostProcessing(device)
 
     print(f'初始化FLowHigh模型...')
     
